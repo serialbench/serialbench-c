@@ -15,6 +15,10 @@
 #include <leptris.h>
 #endif
 
+#if defined(__APPLE__)
+#include <dlfcn.h>
+#endif
+
 typedef struct {
   const char *name;
   double time_per_iteration;
@@ -56,14 +60,15 @@ static row_t bench_libxml2(const char *data, size_t len, int iterations) {
 
 #if HAVE_LEPTRIS
 static row_t bench_leptris(const char *data, size_t len, int iterations) {
+  LeptrisStatus st = LEPTRIS_OK;
   for (int i = 0; i < 3; i++) {
-    leptris_document *doc = leptris_parse_memory(data, len);
-    if (doc) leptris_document_free(doc);
+    LeptrisDocument doc = leptris_parse_string(data, len, &st);
+    if (st == LEPTRIS_OK) leptris_document_free(doc);
   }
   double t0 = now_sec();
   for (int i = 0; i < iterations; i++) {
-    leptris_document *doc = leptris_parse_memory(data, len);
-    if (doc) leptris_document_free(doc);
+    LeptrisDocument doc = leptris_parse_string(data, len, &st);
+    if (st == LEPTRIS_OK) leptris_document_free(doc);
   }
   double elapsed = now_sec() - t0;
   return (row_t){"leptris", elapsed / iterations, iterations / elapsed};
