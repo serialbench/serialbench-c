@@ -1,0 +1,103 @@
+name: benchmark-weekly
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - '**.md'
+  schedule:
+    - cron: '45 2 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "c-site-deploy"
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      compilers: ${{ steps.set-matrix.outputs.compilers }}
+      platforms: ${{ steps.set-matrix.outputs.platforms }}
+      run-date: ${{ steps.set-matrix.outputs.run-date }}
+    steps:
+      - id: set-matrix
+        run: |
+          echo 'compilers=["gcc", "clang"]' >> $GITHUB_OUTPUT
+          echo 'platforms=["ubuntu-24.04", "ubuntu-24.04-arm", "macos-15", "macos-26-intel", "macos-26"]' >> $GITHUB_OUTPUT
+          echo "run-date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
+  benchmark:
+    runs-on: ${{ matrix.platform }}
+    needs: setup
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.setup.outputs.platforms) }}
+        compiler: ${{ fromJson(needs.setup.outputs.compilers) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libxml2
+        run: |
+          if command -v apt-get >/dev/null; then sudo apt-get update && sudo apt-get install -y libxml2-dev;
+          elif command -v brew >/dev/null; then brew install libxml2; fi
+        shell: bash
+
+      - name: Build
+        env:
+          CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+        shell: bash
+
+      - name: Load canonical fixtures
+        run: |
+          git clone --depth 1 https://github.com/serialbench/fixtures.git fixtures
+          (cd fixtures && sha256sum -c SHA256SUMS) || (cd fixtures && shasum -a 256 -c SHA256SUMS)
+        shell: bash
+
+      - name: Benchmark xml
+        continue-on-error: true
+        shell: bash
+        env:
+          SERIALBENCH_PLATFORM: ${{ matrix.platform }}
+          SERIALBENCH_C_VERSION: ${{ matrix.compiler }}
+          DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
+        run: |
+          if [ "${{ github.run_attempt }}" -gt 1 ] && .github/scripts/format-status.sh xml ${{ matrix.compiler }} ${{ matrix.platform }}; then
+            echo "xml already in the data repo — skipping (gap-filling rerun)"
+            exit 0
+          fi
+          C_VERSION="${{ matrix.compiler }}" ./build/serialbench-c fixtures results/xml/results.yaml
+
+      - name: Push xml to data repo
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
+          C_VERSION: ${{ matrix.compiler }}
+        run: .github/scripts/push-to-data.sh xml ${{ matrix.compiler }} ${{ matrix.platform }}
+        shell: bash
+
+      - name: Verify leg completeness
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
+        run: |
+          if .github/scripts/format-status.sh xml "${{ matrix.compiler }}" "${{ matrix.platform }}"; then
+            echo "xml: in data repo"
+          else
+            echo "::error::xml never pushed — failing the leg so autoheal fills the gap"
+            exit 1
+          fi

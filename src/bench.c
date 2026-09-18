@@ -110,6 +110,18 @@ int main(int argc, char **argv) {
   fprintf(out, "  runtime: c\n");
   fprintf(out, "  runtime_version: %s\n", getenv("SERIALBENCH_C_VERSION") ? getenv("SERIALBENCH_C_VERSION") : __VERSION__);
   fprintf(out, "benchmark_config:\n  name: c-full-xml\n  formats: [xml]\n  operations: [parsing]\n");
+  const char *leptris_ver =
+#if HAVE_LEPTRIS
+      "1.9.x";
+#else
+      "unavailable";
+#endif
+  fprintf(out, "  serializers:\n");
+  fprintf(out, "    - name: libxml2\n      format: xml\n      version: %s\n      features: {xpath: true, namespaces: true}\n",
+          LIBXML_DOTTED_VERSION);
+#if HAVE_LEPTRIS
+  fprintf(out, "    - name: leptris\n      format: xml\n      version: %s\n      features: {xpath: true, namespaces: true}\n", leptris_ver);
+#endif
   fprintf(out, "benchmark_result:\n  parsing:\n");
 
   for (int s = 0; s < 3; s++) {
