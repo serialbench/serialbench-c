@@ -76,6 +76,7 @@ jobs:
             echo "xml already in the data repo — skipping (gap-filling rerun)"
             exit 0
           fi
+          mkdir -p results/xml
           C_VERSION="${{ matrix.compiler }}" ./build/serialbench-c fixtures results/xml/results.yaml
 
       - name: Push xml to data repo
