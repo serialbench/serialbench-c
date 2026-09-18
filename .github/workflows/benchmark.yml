@@ -54,7 +54,11 @@ jobs:
         env:
           CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          EXTRA_ARGS=""
+          if command -v brew >/dev/null; then
+            EXTRA_ARGS="-DCMAKE_PREFIX_PATH=$(brew --prefix libxml2)"
+          fi
+          cmake -B build -DCMAKE_BUILD_TYPE=Release $EXTRA_ARGS
           cmake --build build
         shell: bash
 
