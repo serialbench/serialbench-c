@@ -39,6 +39,10 @@ FetchContent_Declare(simdjson GIT_REPOSITORY https://github.com/simdjson/simdjso
 FetchContent_MakeAvailable(simdjson)
 FetchContent_Declare(pugixml GIT_REPOSITORY https://github.com/zeux/pugixml GIT_TAG v1.16 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(pugixml)
+FetchContent_Declare(libcbor GIT_REPOSITORY https://github.com/PJK/libcbor GIT_TAG v0.14.0 GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(libcbor)
+FetchContent_Declare(tinycbor GIT_REPOSITORY https://github.com/intel/tinycbor GIT_TAG v0.6.1 GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(tinycbor)
 
 add_executable(serialbench-c src/bench.c src/bench_extra.c src/bench_cpp.cpp)
 if(ryml_FOUND OR TARGET ryml)
@@ -65,6 +69,21 @@ endif()
 if(TARGET pugixml::pugixml)
   target_compile_definitions(serialbench-c PRIVATE HAVE_PUGIXML=1)
   target_link_libraries(serialbench-c PRIVATE pugixml::pugixml)
+endif()
+if(TARGET libcbor::libcbor)
+  target_compile_definitions(serialbench-c PRIVATE HAVE_LIBCBOR=1)
+  target_link_libraries(serialbench-c PRIVATE libcbor::libcbor)
+endif()
+# tinycbor ships no CMakeLists (v0.6.1): compile the decode path directly
+if(EXISTS "${tinycbor_SOURCE_DIR}/src/cborparser.c")
+  target_compile_definitions(serialbench-c PRIVATE HAVE_TINYCBOR=1
+    TINYCBOR_CBOR_H="${tinycbor_SOURCE_DIR}/src/cbor.h")
+  target_sources(serialbench-c PRIVATE
+    "${tinycbor_SOURCE_DIR}/src/cborparser.c"
+    "${tinycbor_SOURCE_DIR}/src/cborparser_dup_string.c"
+    "${tinycbor_SOURCE_DIR}/src/cborparser_float.c"
+    "${tinycbor_SOURCE_DIR}/src/cborerrorstrings.c"
+    "${tinycbor_SOURCE_DIR}/src/cborvalidation.c")
 endif()
 target_compile_definitions(serialbench-c PRIVATE HAVE_EXTRA_BENCH=1)
 

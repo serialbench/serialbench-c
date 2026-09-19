@@ -16,6 +16,8 @@
 #include <yeptris.h>
 #include <yeptris/json.h>
 #include <yeptris/parse.h>
+#define YEPTRIS_WITH_CBOR
+#include <yeptris/cbor.h>
 #endif
 #if HAVE_TEPTRIS
 #include <teptris/teptris.h>
@@ -38,6 +40,9 @@
 #endif
 #if HAVE_LIBYAML
 #include <yaml.h>
+#endif
+#if HAVE_LIBCBOR
+#include <cbor.h>
 #endif
 
 typedef struct { const char *name; const char *fmt; const char *size; double tpi; double ips; } row_t;
@@ -111,7 +116,14 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
 
     if (!strcmp(fmt, "html")) {
 #if HAVE_LEPTRIS
+      /* html4 = libxml2-parity engine (what libxml2 benchmarks against);
+       * the WHATWG-conformant engine is priced separately */
       BENCH("leptris", "html", sizes[s], iters[s],, {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_html4_string(data, len, &st);
+        if (st == LEPTRIS_OK) leptris_document_free(d);
+      },);
+      BENCH("leptris-whatwg", "html", sizes[s], iters[s],, {
         LeptrisStatus st = LEPTRIS_OK;
         LeptrisDocument d = leptris_parse_html_string(data, len, &st);
         if (st == LEPTRIS_OK) leptris_document_free(d);
@@ -182,6 +194,23 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
 #endif
     }
 
+    if (!strcmp(fmt, "cbor")) {
+#if HAVE_YEPTRIS
+      BENCH("yeptris", "cbor", sizes[s], iters[s],, {
+        YeptrisStatus st = 0;
+        YeptrisDocument d = yeptris_cbor_decode(data, len, 0, &st);
+        if (st == 0) yeptris_document_free(d);
+      },);
+#endif
+#if HAVE_LIBCBOR
+      BENCH("libcbor", "cbor", sizes[s], iters[s],, {
+        struct cbor_load_result res;
+        cbor_item_t *item = cbor_load((const unsigned char *)data, len, &res);
+        if (item) cbor_decref(&item);
+      },);
+#endif
+    }
+
     if (!strcmp(fmt, "xslt")) {
 #if HAVE_LEPTRIS
       /* stylesheet compiled once per iteration = compile+apply, ruby parity */
@@ -232,7 +261,7 @@ int main(int argc, char **argv) {
 #if HAVE_LIBXML2
   LIBXML_TEST_VERSION
 #endif
-  const char *all[] = {"xml", "html", "json", "yaml", "toml", "xslt"};
+  const char *all[] = {"xml", "html", "json", "yaml", "toml", "cbor", "xslt"};
   dir_cache = argv[1];
   const char *want = argc > 3 ? argv[3] : NULL;
   for (unsigned i = 0; i < sizeof(all)/sizeof(all[0]); i++) {
@@ -303,6 +332,12 @@ int main(int argc, char **argv) {
 #endif
 #if HAVE_TEPTRIS
   fprintf(out, "    - {name: teptris, format: toml, version: '%s', features: {}}\n", teptris_version_string());
+#endif
+#if HAVE_LIBCBOR
+  fprintf(out, "    - {name: libcbor, format: cbor, version: '0.14', features: {}}\n");
+#endif
+#if HAVE_YEPTRIS
+  fprintf(out, "    - {name: yeptris, format: cbor, version: '%s', features: {}}\n", yeptris_version());
 #endif
   fputs(ser_buf, out);
   fprintf(out, "benchmark_result:\n  parsing:\n");

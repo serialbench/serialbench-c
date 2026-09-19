@@ -113,7 +113,7 @@ jobs:
           DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
         run: |
-          for FMT in xml html json yaml toml; do
+          for FMT in xml html json yaml toml cbor; do
             if [ "${{ github.run_attempt }}" -gt 1 ] && .github/scripts/format-status.sh "$FMT" ${{ matrix.compiler }} ${{ matrix.platform }}; then
               echo "$FMT already in data repo — skipping"
               continue
@@ -131,7 +131,7 @@ jobs:
           DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
         run: |
           MISSING=""
-          for FMT in xml html json yaml toml; do
+          for FMT in xml html json yaml toml cbor; do
             if .github/scripts/format-status.sh "$FMT" "${{ matrix.compiler }}" "${{ matrix.platform }}"; then
               echo "$FMT: in data repo"
             else
