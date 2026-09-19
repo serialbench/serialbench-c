@@ -273,7 +273,7 @@ int main(int argc, char **argv) {
   fprintf(out, ", xslt]\n");
   fprintf(out, "serializers:\n");
 #if HAVE_LEPTRIS
-  fprintf(out, "    - {name: leptris, format: xml, version: '%s', features: {xpath: true, html5: true, xslt: true}}\n", getenv("LEPTRIS_C_VERSION") ? getenv("LEPTRIS_C_VERSION") : "native");
+  fprintf(out, "    - {name: leptris, format: xml, version: '%s', features: {xpath: true, html5: true, xslt: true}}\n", leptris_version());
 #endif
 #if HAVE_LIBXML2
   fprintf(out, "    - {name: libxml2, format: xml, version: '%s', features: {xpath: true}}\n", LIBXML_DOTTED_VERSION);
@@ -282,8 +282,8 @@ int main(int argc, char **argv) {
   fprintf(out, "    - {name: libxslt, format: xml, version: '%s', features: {xslt: true}}\n", LIBXSLT_DOTTED_VERSION);
 #endif
 #if HAVE_YEPTRIS
-  fprintf(out, "    - {name: yeptris, format: json, version: '%s', features: {}}\n", getenv("YEPTRIS_C_VERSION") ? getenv("YEPTRIS_C_VERSION") : "native");
-  fprintf(out, "    - {name: yeptris, format: yaml, version: '%s', features: {}}\n", getenv("YEPTRIS_C_VERSION") ? getenv("YEPTRIS_C_VERSION") : "native");
+  fprintf(out, "    - {name: yeptris, format: json, version: '%s', features: {}}\n", yeptris_version());
+  fprintf(out, "    - {name: yeptris, format: yaml, version: '%s', features: {}}\n", yeptris_version());
 #endif
 #if HAVE_JANSSON
   fprintf(out, "    - {name: jansson, format: json, version: '%s', features: {}}\n", JANSSON_VERSION);
@@ -301,7 +301,7 @@ int main(int argc, char **argv) {
   fprintf(out, "    - {name: libyaml, format: yaml, version: '%s', features: {}}\n", yaml_get_version_string());
 #endif
 #if HAVE_TEPTRIS
-  fprintf(out, "    - {name: teptris, format: toml, version: '%s', features: {}}\n", getenv("TEPTRIS_C_VERSION") ? getenv("TEPTRIS_C_VERSION") : "native");
+  fprintf(out, "    - {name: teptris, format: toml, version: '%s', features: {}}\n", teptris_version_string());
 #endif
   fputs(ser_buf, out);
   fprintf(out, "benchmark_result:\n  parsing:\n");
