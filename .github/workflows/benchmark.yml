@@ -64,8 +64,7 @@ jobs:
 
       - name: Fetch tomlc17
         run: |
-          git clone -q --depth 1 https://github.com/serge-rgb/tomlc17.git /tmp/tomlc17 || \
-          git clone -q --depth 1 https://github.com/cebix/tomlc17.git /tmp/tomlc17 || true
+          git clone -q --depth 1 https://github.com/cktan/tomlc17.git /tmp/tomlc17 || true
           ls /tmp/tomlc17/src/tomlc17.h 2>/dev/null || echo "tomlc17 unavailable"
         shell: bash
 
@@ -74,9 +73,9 @@ jobs:
           CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
           CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
         run: |
-          TRIS_ARGS="-DLEPTRIS_DIR=/tmp/leptris/build -DLEPTRIS_INC=/tmp/leptris/src/include \
-                     -DYEPTRIS_DIR=/tmp/yeptris/build -DYEPTRIS_INC=/tmp/yeptris/src/include;/tmp/yeptris/build/generated \
-                     -DTEPTRIS_DIR=/tmp/teptris/build -DTEPTRIS_INC=/tmp/teptris/src/include"
+          TRIS_ARGS="-DLEPTRIS_DIR=/tmp/leptris/build/src -DLEPTRIS_INC=/tmp/leptris/src/include \
+                     -DYEPTRIS_DIR=/tmp/yeptris/build/src -DYEPTRIS_INC=/tmp/yeptris/src/include;/tmp/yeptris/build/generated \
+                     -DTEPTRIS_DIR=/tmp/teptris/build/src -DTEPTRIS_INC=/tmp/teptris/src/include"
           [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
           PREFIX_ARGS=""
           if command -v brew >/dev/null; then
