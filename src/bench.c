@@ -243,9 +243,10 @@ int main(int argc, char **argv) {
 
 #if HAVE_EXTRA_BENCH
   {
-    extern void bench_extra(const char *dir, void (*emit)(const char *, const char *, const char *, int, double),
+    extern void bench_extra(const char *dir, const char *want,
+                            void (*emit)(const char *, const char *, const char *, int, double),
                             void (*ser)(const char *, const char *, const char *));
-    bench_extra(dir_cache, add_row_ext, serializer_ext);
+    bench_extra(dir_cache, want, add_row_ext, serializer_ext);
   }
 #endif
 

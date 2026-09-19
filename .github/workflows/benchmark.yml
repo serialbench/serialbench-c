@@ -93,29 +93,24 @@ jobs:
           (cd fixtures && sha256sum -c SHA256SUMS) || (cd fixtures && shasum -a 256 -c SHA256SUMS)
         shell: bash
 
-      - name: Benchmark all formats
+      - name: Benchmark each format
         continue-on-error: true
         shell: bash
         env:
           SERIALBENCH_PLATFORM: ${{ matrix.platform }}
           SERIALBENCH_C_VERSION: ${{ matrix.compiler }}
           DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
-        run: |
-          if [ "${{ github.run_attempt }}" -gt 1 ] && .github/scripts/format-status.sh all ${{ matrix.compiler }} ${{ matrix.platform }}; then
-            echo "already in the data repo — skipping (gap-filling rerun)"
-            exit 0
-          fi
-          mkdir -p results/all
-          C_VERSION="${{ matrix.compiler }}" ./build/serialbench-c fixtures results/all/results.yaml
-
-      - name: Push to data repo
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        env:
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
-          DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
-        run: .github/scripts/push-to-data.sh all ${{ matrix.compiler }} ${{ matrix.platform }}
-        shell: bash
+        run: |
+          for FMT in xml html json yaml toml; do
+            if [ "${{ github.run_attempt }}" -gt 1 ] && .github/scripts/format-status.sh "$FMT" ${{ matrix.compiler }} ${{ matrix.platform }}; then
+              echo "$FMT already in data repo — skipping"
+              continue
+            fi
+            mkdir -p "results/$FMT"
+            C_VERSION="${{ matrix.compiler }}" ./build/serialbench-c fixtures "results/$FMT/results.yaml" "$FMT"
+            .github/scripts/push-to-data.sh "$FMT" ${{ matrix.compiler }} ${{ matrix.platform }}
+          done
 
       - name: Verify leg completeness
         if: ${{ !cancelled() }}
@@ -124,9 +119,16 @@ jobs:
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
           DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
         run: |
-          if .github/scripts/format-status.sh all "${{ matrix.compiler }}" "${{ matrix.platform }}"; then
-            echo "results: in data repo"
-          else
-            echo "::error::results never pushed — failing the leg so autoheal fills the gap"
+          MISSING=""
+          for FMT in xml html json yaml toml; do
+            if .github/scripts/format-status.sh "$FMT" "${{ matrix.compiler }}" "${{ matrix.platform }}"; then
+              echo "$FMT: in data repo"
+            else
+              echo "$FMT: MISSING from data repo"
+              MISSING="$MISSING $FMT"
+            fi
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::formats never pushed:${MISSING} — failing the leg so autoheal fills the gap"
             exit 1
           fi

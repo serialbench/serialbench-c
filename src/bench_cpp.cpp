@@ -22,12 +22,14 @@ static double now_cxx() {
   return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-extern "C" void bench_cpp(const char *dir, void (*emit)(const char *, const char *, const char *, int, double)) {
+extern "C" void bench_cpp(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
+  (void)want;
   static const char *sizes[] = {"small", "medium", "large"};
   static const int iters[] = {10, 3, 1};
   char path[600];
 
 #if HAVE_NLOHMANN
+  if (!want || !strcmp(want, "json"))
   for (int s = 0; s < 3; s++) {
     snprintf(path, sizeof path, "%s/%s.json", dir, sizes[s]);
     size_t len; char *data = read_file_cxx(path, &len);
@@ -41,6 +43,7 @@ extern "C" void bench_cpp(const char *dir, void (*emit)(const char *, const char
 #endif
 
 #if HAVE_RYML
+  if (!want || !strcmp(want, "yaml"))
   for (int s = 0; s < 3; s++) {
     snprintf(path, sizeof path, "%s/%s.yaml", dir, sizes[s]);
     size_t len; char *data = read_file_cxx(path, &len);

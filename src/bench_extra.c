@@ -17,7 +17,8 @@ static char *read_file_x(const char *path, size_t *len) {
 }
 static double now_x(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return ts.tv_sec + ts.tv_nsec / 1e9; }
 
-void bench_jsonc(const char *dir, void (*emit)(const char *, const char *, const char *, int, double)) {
+void bench_jsonc(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
+  if (want && strcmp(want, "json")) return;
   static const char *sizes[] = {"small", "medium", "large"};
   static const int iters[] = {10, 3, 1};
   char path[512];
@@ -34,22 +35,25 @@ void bench_jsonc(const char *dir, void (*emit)(const char *, const char *, const
 }
 #else
 #include <stddef.h>
-void bench_jsonc(const char *dir, void (*emit)(const char *, const char *, const char *, int, double)) { (void)dir; (void)emit; }
+void bench_jsonc(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
+  if (want && strcmp(want, "json")) return; (void)dir; (void)emit; }
 #endif
 
-extern void bench_cpp(const char *dir, void (*emit)(const char *, const char *, const char *, int, double));
+extern void bench_cpp(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double));
 
-void bench_extra(const char *dir, void (*emit)(const char *, const char *, const char *, int, double),
+void bench_extra(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double),
                  void (*ser)(const char *, const char *, const char *)) {
-  bench_jsonc(dir, emit);
-  bench_cpp(dir, emit);
+  bench_jsonc(dir, want, emit);
+  bench_cpp(dir, want, emit);
+  int json_ok = !want || !strcmp(want, "json");
+  int yaml_ok = !want || !strcmp(want, "yaml");
 #if HAVE_JSON_C
-  ser("json-c", "json", json_c_version());
+  if (json_ok) ser("json-c", "json", json_c_version());
 #endif
 #if HAVE_NLOHMANN
-  ser("nlohmann-json", "json", "3.x");
+  if (json_ok) ser("nlohmann-json", "json", "3.x");
 #endif
 #if HAVE_RYML
-  ser("rapidyaml", "yaml", "0.7");
+  if (yaml_ok) ser("rapidyaml", "yaml", "0.7");
 #endif
 }
