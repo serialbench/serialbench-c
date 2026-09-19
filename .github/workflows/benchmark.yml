@@ -57,10 +57,11 @@ jobs:
 
       - name: Build tris cores from source
         shell: msys2 {0}
-        env:
-          CC: gcc
-          CXX: g++
         run: |
+          # PATH resolution hands 'gcc' to the MSYS /usr/bin compiler —
+          # pin the absolute ucrt64 (mingw) toolchain
+          export CC=$(cygpath -m /ucrt64/bin/gcc.exe)
+          export CXX=$(cygpath -m /ucrt64/bin/g++.exe)
           mkdir -p /tmp/tris-libs
           # native mingw cmake cannot read msys /tmp paths in -D args (they
           # skip msys2 auto-conversion) — precompute windows-style paths
@@ -91,10 +92,9 @@ jobs:
 
       - name: Build harness
         shell: msys2 {0}
-        env:
-          CC: gcc
-          CXX: g++
         run: |
+          export CC=$(cygpath -m /ucrt64/bin/gcc.exe)
+          export CXX=$(cygpath -m /ucrt64/bin/g++.exe)
           TL=$(cygpath -m /tmp/tris-libs); LP=$(cygpath -m /tmp/leptris/src/include)
           YP=$(cygpath -m /tmp/yeptris/src/include); YG=$(cygpath -m /tmp/yeptris/build/generated)
           TP=$(cygpath -m /tmp/teptris/src/include); UP=$(cygpath -m /tmp/utf8prefix)
