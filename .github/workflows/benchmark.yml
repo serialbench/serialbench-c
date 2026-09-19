@@ -57,6 +57,9 @@ jobs:
 
       - name: Build tris cores from source
         shell: msys2 {0}
+        env:
+          CC: gcc
+          CXX: g++
         run: |
           mkdir -p /tmp/tris-libs
           # native mingw cmake cannot read msys /tmp paths in -D args (they
