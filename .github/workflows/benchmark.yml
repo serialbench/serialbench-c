@@ -55,11 +55,16 @@ jobs:
 
       - name: Build tris cores from source
         run: |
+          mkdir -p /tmp/tris-libs
           for repo in leptris yeptris teptris; do
             git clone -q --depth 1 https://github.com/leptris/$repo.git /tmp/$repo
             cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 > /dev/null
             cmake --build /tmp/$repo/build -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)" 2>&1 | tail -1
+            find /tmp/$repo/build -name '*.so*' -o -name '*.dylib*' -o -name '*.a' | grep -v CMake | while read -r lib; do
+              cp "$lib" /tmp/tris-libs/ 2>/dev/null || true
+            done
           done
+          ls /tmp/tris-libs/
         shell: bash
 
       - name: Fetch tomlc17
@@ -73,9 +78,10 @@ jobs:
           CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
           CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
         run: |
-          TRIS_ARGS="-DLEPTRIS_DIR=/tmp/leptris/build/src -DLEPTRIS_INC=/tmp/leptris/src/include \
-                     -DYEPTRIS_DIR=/tmp/yeptris/build/src -DYEPTRIS_INC=/tmp/yeptris/src/include;/tmp/yeptris/build/generated \
-                     -DTEPTRIS_DIR=/tmp/teptris/build/src -DTEPTRIS_INC=/tmp/teptris/src/include"
+          TRIS_ARGS="-DTRIS_LIB_DIR=/tmp/tris-libs \
+                     -DLEPTRIS_INC=/tmp/leptris/src/include \
+                     -DYEPTRIS_INC=/tmp/yeptris/src/include\;/tmp/yeptris/build/generated \
+                     -DTEPTRIS_INC=/tmp/teptris/src/include"
           [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
           PREFIX_ARGS=""
           if command -v brew >/dev/null; then
