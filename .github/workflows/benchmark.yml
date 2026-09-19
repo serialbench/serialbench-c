@@ -58,7 +58,7 @@ jobs:
           mkdir -p /tmp/tris-libs
           for repo in leptris yeptris teptris; do
             git clone -q --depth 1 https://github.com/leptris/$repo.git /tmp/$repo
-            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 > /dev/null
+            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF > /dev/null
             cmake --build /tmp/$repo/build -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)" 2>&1 | tail -1
             find /tmp/$repo/build -name '*.so*' -o -name '*.dylib*' -o -name '*.a' | grep -v CMake | while read -r lib; do
               cp "$lib" /tmp/tris-libs/ 2>/dev/null || true
