@@ -39,9 +39,10 @@ FetchContent_Declare(simdjson GIT_REPOSITORY https://github.com/simdjson/simdjso
 FetchContent_MakeAvailable(simdjson)
 FetchContent_Declare(pugixml GIT_REPOSITORY https://github.com/zeux/pugixml GIT_TAG v1.16 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(pugixml)
-# libcbor check_ipo_supported->sets IPO for Release; the LTO archive
-# fails to link under clang ld (same class as the tris *_ENABLE_LTO)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+# libcbor enables LTO for Release unless CMAKE_INTERPROCEDURAL_OPTIMIZATION_
+# RELEASE is defined; the LTO archive fails to link under clang ld (same
+# class as the tris *_ENABLE_LTO overrides)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
 FetchContent_Declare(libcbor GIT_REPOSITORY https://github.com/PJK/libcbor GIT_TAG v0.14.0 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(libcbor)
 FetchContent_Declare(tinycbor GIT_REPOSITORY https://github.com/intel/tinycbor GIT_TAG v0.6.1 GIT_SHALLOW TRUE)
