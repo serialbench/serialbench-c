@@ -105,7 +105,7 @@ jobs:
             set -- $spec; fmt=$1; shift
             ads=$(printf "%s|" "$@"); ads=${ads%|}
             for sz in small medium large; do
-              distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep " $sz " | grep -oE "count=[0-9]+" | sort -u | wc -l)
+              distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep " $sz " | grep -oE "count=[0-9]+" | sort -u | wc -l | tr -d " ")
               echo "$fmt/$sz element counts: $distinct distinct (expect 1)"
               [ "$distinct" = "1" ] || { echo "::error::$fmt/$sz element counts disagree across adapters"; exit 1; }
             done
@@ -233,7 +233,7 @@ jobs:
             set -- $spec; fmt=$1; shift
             ads=$(printf "%s|" "$@"); ads=${ads%|}
             for sz in small medium large; do
-              distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep " $sz " | grep -oE "count=[0-9]+" | sort -u | wc -l)
+              distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep " $sz " | grep -oE "count=[0-9]+" | sort -u | wc -l | tr -d " ")
               echo "$fmt/$sz element counts: $distinct distinct (expect 1)"
               [ "$distinct" = "1" ] || { echo "::error::$fmt/$sz element counts disagree across adapters"; exit 1; }
             done
