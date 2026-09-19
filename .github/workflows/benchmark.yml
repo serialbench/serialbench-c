@@ -89,6 +89,8 @@ jobs:
                      -DYEPTRIS_LIB=/tmp/tris-libs/libyeptris.a -DYEPTRIS_INC=/tmp/yeptris/src/include \
                      -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated"
           [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
+          # windows: apt/brew do not exist here — utf8proc is built from source
+          TRIS_ARGS="$TRIS_ARGS -DUTF8PROC_LIB=/tmp/tris-libs/libutf8proc.a"
           # shellcheck disable=SC2086
           cmake -B build -DCMAKE_BUILD_TYPE=Release $TRIS_ARGS
           cmake --build build
@@ -210,8 +212,7 @@ jobs:
         run: |
           TRIS_ARGS="-DLEPTRIS_LIB=/tmp/tris-libs/libleptris.a -DLEPTRIS_INC=/tmp/leptris/src/include \
                      -DYEPTRIS_LIB=/tmp/tris-libs/libyeptris.a -DYEPTRIS_INC=/tmp/yeptris/src/include \
-                     -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated \
-                     -DUTF8PROC_LIB=/tmp/tris-libs/libutf8proc.a"
+                     -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated"
           [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
           PREFIX_ARGS=""
           if command -v brew >/dev/null; then
