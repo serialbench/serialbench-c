@@ -104,9 +104,11 @@ jobs:
           for spec in "xml leptris libxml2 pugixml" "html leptris libxml2"; do
             set -- $spec; fmt=$1; shift
             ads=$(printf "%s|" "$@"); ads=${ads%|}
-            distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep -oE "count=[0-9]+" | sort -u | wc -l)
-            echo "$fmt element counts: $distinct distinct (expect 1)"
-            [ "$distinct" = "1" ] || { echo "::error::$fmt element counts disagree across adapters"; exit 1; }
+            for sz in small medium large; do
+              distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep " $sz " | grep -oE "count=[0-9]+" | sort -u | wc -l)
+              echo "$fmt/$sz element counts: $distinct distinct (expect 1)"
+              [ "$distinct" = "1" ] || { echo "::error::$fmt/$sz element counts disagree across adapters"; exit 1; }
+            done
           done
 
       - name: Benchmark each format
@@ -230,9 +232,11 @@ jobs:
           for spec in "xml leptris libxml2 pugixml" "html leptris libxml2"; do
             set -- $spec; fmt=$1; shift
             ads=$(printf "%s|" "$@"); ads=${ads%|}
-            distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep -oE "count=[0-9]+" | sort -u | wc -l)
-            echo "$fmt element counts: $distinct distinct (expect 1)"
-            [ "$distinct" = "1" ] || { echo "::error::$fmt element counts disagree across adapters"; exit 1; }
+            for sz in small medium large; do
+              distinct=$(grep "^CHECK $fmt " /tmp/check.log | grep -wE "$ads" | grep " $sz " | grep -oE "count=[0-9]+" | sort -u | wc -l)
+              echo "$fmt/$sz element counts: $distinct distinct (expect 1)"
+              [ "$distinct" = "1" ] || { echo "::error::$fmt/$sz element counts disagree across adapters"; exit 1; }
+            done
           done
         shell: bash
 
