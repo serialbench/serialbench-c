@@ -25,6 +25,7 @@
 #if HAVE_LIBXML2
 #include <libxml/parser.h>
 #include <libxml/HTMLparser.h>
+#include <libxml/HTMLtree.h>
 #include <libxml/tree.h>
 #endif
 #if HAVE_LIBXSLT
@@ -45,9 +46,10 @@
 #include <cbor.h>
 #endif
 
-typedef struct { const char *name; const char *fmt; const char *size; double tpi; double ips; } row_t;
+typedef struct { const char *name; const char *fmt; const char *size; const char *op; double tpi; double ips; } row_t;
 static row_t rows[256];
 static int nrows = 0;
+const char *g_cur_op = "parsing";
 static const char *g_format = NULL;
 static const char *dir_cache = NULL;
 static void add_row(const char *name, const char *fmt, const char *size, int iters, double elapsed);
@@ -56,6 +58,7 @@ void add_row_ext(const char *name, const char *fmt, const char *size, int iters,
 static void add_row(const char *name, const char *fmt, const char *size, int iters, double elapsed) {
   if (nrows >= 256) return;
   rows[nrows].name = name; rows[nrows].fmt = fmt; rows[nrows].size = size;
+  rows[nrows].op = g_cur_op;
   rows[nrows].tpi = elapsed / iters; rows[nrows].ips = iters / elapsed;
   nrows++;
 }
@@ -89,6 +92,163 @@ static double now_sec(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC,
   add_row(label, fmt, size, iters, now_sec() - t0); \
 } while (0)
 
+static const char *XPATH_QUERIES[] = {"//user | //record", "//user[@id='101']", "//preferences/theme"};
+int g_check_failed = 0;
+
+static void check_line(const char *fmt, const char *adapter, const char *size, int ok, long count) {
+  if (ok) printf("CHECK %s %s %s count=%ld OK\n", fmt, adapter, size, count);
+  else { printf("CHECK %s %s %s FAIL\n", fmt, adapter, size); g_check_failed = 1; }
+}
+
+void check_all(const char *dir) {
+  static const char *sizes[] = {"small", "medium", "large"};
+  static const char *fmts[] = {"xml", "html", "json", "yaml", "toml", "cbor"};
+  char path[512];
+  for (unsigned f = 0; f < sizeof(fmts)/sizeof(fmts[0]); f++) {
+    const char *fmt = fmts[f];
+    for (int s = 0; s < 3; s++) {
+      snprintf(path, sizeof path, "%s/%s.%s", dir, sizes[s], fmt);
+      size_t len; char *data = read_file(path, &len);
+      if (!data) { fprintf(stderr, "missing %s\n", path); g_check_failed = 1; continue; }
+
+      if (!strcmp(fmt, "xml") || !strcmp(fmt, "html")) {
+#if HAVE_LEPTRIS
+        {
+          LeptrisStatus st = LEPTRIS_OK;
+          LeptrisDocument d = !strcmp(fmt, "xml")
+            ? leptris_parse_string(data, len, &st)
+            : leptris_parse_html4_string(data, len, &st);
+          long n = -1;
+          if (st == LEPTRIS_OK) {
+            LeptrisXPathResult r = leptris_xpath_eval(d, NULL, "//*");
+            n = (long)leptris_xpath_result_count(r);
+            leptris_xpath_result_free(r);
+          }
+          check_line(fmt, "leptris", sizes[s], st == LEPTRIS_OK && n > 0, n);
+          leptris_document_free(d);
+        }
+#endif
+#if HAVE_LIBXML2
+        {
+          xmlDocPtr d = !strcmp(fmt, "xml")
+            ? xmlReadMemory(data, (int)len, NULL, NULL, XML_PARSE_NOBLANKS)
+            : htmlReadMemory(data, (int)len, NULL, NULL, HTML_PARSE_NOBLANKS | HTML_PARSE_RECOVER);
+          long n = -1;
+          if (d) {
+            xmlXPathContextPtr ctx = xmlXPathNewContext(d);
+            xmlXPathObjectPtr o = xmlXPathEvalExpression((const xmlChar *)"//*", ctx);
+            n = o && o->nodesetval ? o->nodesetval->nodeNr : 0;
+            if (o) xmlXPathFreeObject(o);
+            xmlXPathFreeContext(ctx);
+          }
+          check_line(fmt, "libxml2", sizes[s], d && n > 0, n);
+          if (d) xmlFreeDoc(d);
+        }
+#endif
+      }
+
+      if (!strcmp(fmt, "json")) {
+#if HAVE_YEPTRIS
+        {
+          YeptrisStatus st = 0;
+          YeptrisDocument d = yeptris_parse_json(data, len, &st);
+          check_line(fmt, "yeptris", sizes[s], st == 0, st == 0 ? (long)yeptris_document_count(d) : -1);
+          yeptris_document_free(d);
+        }
+#endif
+#if HAVE_JANSSON
+        {
+          json_error_t err;
+          json_t *r = json_loadb(data, len, 0, &err);
+          /* no recursive count: jansson and json-c both export
+           * json_object_iter_next and the linker misbinds the
+           * reference — iterators are off-limits with both loaded */
+          check_line(fmt, "jansson", sizes[s], r != NULL, -1);
+          if (r) json_decref(r);
+        }
+#endif
+      }
+
+      if (!strcmp(fmt, "yaml")) {
+#if HAVE_YEPTRIS
+        {
+          YeptrisStatus st = 0;
+          YeptrisDocument d = yeptris_parse(data, len, &st);
+          check_line(fmt, "yeptris", sizes[s], st == 0, st == 0 ? (long)yeptris_document_count(d) : -1);
+          yeptris_document_free(d);
+        }
+#endif
+#if HAVE_LIBYAML
+        {
+          yaml_parser_t parser;
+          long events = 0;
+          int ok = 0;
+          if (yaml_parser_initialize(&parser)) {
+            yaml_event_t event;
+            yaml_parser_set_input_string(&parser, (unsigned char *)data, len);
+            while (yaml_parser_parse(&parser, &event)) {
+              events++;
+              int done = (event.type == YAML_STREAM_END_EVENT);
+              yaml_event_delete(&event);
+              if (done) { ok = 1; break; }
+            }
+            yaml_parser_delete(&parser);
+          }
+          check_line(fmt, "libyaml", sizes[s], ok, events);
+        }
+#endif
+      }
+
+      if (!strcmp(fmt, "toml")) {
+#if HAVE_TEPTRIS
+        {
+          teptris_document *d = NULL;
+          teptris_status st = teptris_parse(data, len, NULL, &d);
+          check_line(fmt, "teptris", sizes[s], st == TEPTRIS_OK, -1);
+          teptris_document_free(d);
+        }
+#endif
+#if HAVE_TOMLC17
+        {
+          toml_result_t r = toml_parse(data, (int)len);
+          check_line(fmt, "tomlc17", sizes[s], r.ok != 0, -1);
+          toml_free(r);
+        }
+#endif
+      }
+
+      if (!strcmp(fmt, "cbor")) {
+#if HAVE_YEPTRIS
+        {
+          YeptrisStatus st = 0;
+          YeptrisDocument d = yeptris_cbor_decode(data, len, 0, &st);
+          check_line(fmt, "yeptris", sizes[s], st == 0, st == 0 ? (long)yeptris_document_count(d) : -1);
+          yeptris_document_free(d);
+        }
+#endif
+#if HAVE_LIBCBOR
+        {
+          struct cbor_load_result res;
+          cbor_item_t *item = cbor_load((const unsigned char *)data, len, &res);
+          check_line(fmt, "libcbor", sizes[s], item != NULL, -1);
+          if (item) cbor_decref(&item);
+        }
+#endif
+      }
+      free(data);
+    }
+  }
+  {
+    extern void bench_jsonc_check(const char *);
+    extern void bench_tinycbor_check(const char *);
+    extern void bench_cpp_check(const char *);
+    bench_jsonc_check(dir);
+    bench_tinycbor_check(dir);
+    bench_cpp_check(dir);
+  }
+  printf("CHECK %s\n", g_check_failed ? "FAILED" : "ALL OK");
+}
+
 static void run_format(const char *fmt, const char *dir, const char *fixtures_ext) {
   static const char *sizes[] = {"small", "medium", "large"};
   static const int iters[] = {10, 3, 1};
@@ -112,6 +272,61 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         if (d) xmlFreeDoc(d);
       },);
 #endif
+
+#if HAVE_LEPTRIS
+      g_cur_op = "generation";
+      BENCH("leptris", "xml", sizes[s], iters[s],, {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(data, len, &st);
+        if (st == LEPTRIS_OK) {
+          char *out = leptris_document_serialize(d, NULL);
+          if (out) leptris_free_string(out);
+        }
+        leptris_document_free(d);
+      },);
+      g_cur_op = "xpath";
+      BENCH("leptris", "xml", sizes[s], iters[s],, {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(data, len, &st);
+        if (st == LEPTRIS_OK) {
+          for (unsigned q = 0; q < 3; q++) {
+            LeptrisXPathResult r = leptris_xpath_eval(d, NULL, XPATH_QUERIES[q]);
+            leptris_xpath_result_free(r);
+          }
+        }
+        leptris_document_free(d);
+      },);
+      g_cur_op = "parsing";
+#endif
+
+#if HAVE_LIBXML2
+      g_cur_op = "generation";
+      BENCH("libxml2", "xml", sizes[s], iters[s],, {
+        xmlDocPtr d = xmlReadMemory(data, (int)len, NULL, NULL, XML_PARSE_NOBLANKS);
+        if (d) {
+          xmlChar *out; int size;
+          xmlDocDumpMemory(d, &out, &size);
+          if (out) xmlFree(out);
+        }
+        xmlFreeDoc(d);
+      },);
+      g_cur_op = "xpath";
+      BENCH("libxml2", "xml", sizes[s], iters[s],, {
+        xmlDocPtr d = xmlReadMemory(data, (int)len, NULL, NULL, XML_PARSE_NOBLANKS);
+        if (d) {
+          xmlXPathContextPtr ctx = xmlXPathNewContext(d);
+          if (ctx) {
+            for (unsigned q = 0; q < 3; q++) {
+              xmlXPathObjectPtr o = xmlXPathEvalExpression((const xmlChar *)XPATH_QUERIES[q], ctx);
+              if (o) xmlXPathFreeObject(o);
+            }
+            xmlXPathFreeContext(ctx);
+          }
+        }
+        xmlFreeDoc(d);
+      },);
+      g_cur_op = "parsing";
+#endif
     }
 
     if (!strcmp(fmt, "html")) {
@@ -128,12 +343,34 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         LeptrisDocument d = leptris_parse_html_string(data, len, &st);
         if (st == LEPTRIS_OK) leptris_document_free(d);
       },);
+      g_cur_op = "generation";
+      BENCH("leptris", "html", sizes[s], iters[s],, {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_html4_string(data, len, &st);
+        if (st == LEPTRIS_OK) {
+          char *out = leptris_document_serialize(d, NULL);
+          if (out) leptris_free_string(out);
+        }
+        leptris_document_free(d);
+      },);
+      g_cur_op = "parsing";
 #endif
 #if HAVE_LIBXML2
       BENCH("libxml2", "html", sizes[s], iters[s],, {
         htmlDocPtr d = htmlReadMemory(data, (int)len, NULL, NULL, HTML_PARSE_NOBLANKS | HTML_PARSE_RECOVER);
         if (d) xmlFreeDoc(d);
       },);
+      g_cur_op = "generation";
+      BENCH("libxml2", "html", sizes[s], iters[s],, {
+        htmlDocPtr d = htmlReadMemory(data, (int)len, NULL, NULL, HTML_PARSE_NOBLANKS | HTML_PARSE_RECOVER);
+        if (d) {
+          xmlChar *out; int size;
+          htmlDocDumpMemory(d, &out, &size);
+          if (out) xmlFree(out);
+        }
+        xmlFreeDoc(d);
+      },);
+      g_cur_op = "parsing";
 #endif
     }
 
@@ -151,6 +388,35 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         json_t *r = json_loadb(data, len, 0, &err);
         if (r) json_decref(r);
       },);
+#endif
+
+#if HAVE_YEPTRIS
+      g_cur_op = "generation";
+      BENCH("yeptris", "json", sizes[s], iters[s],, {
+        YeptrisStatus st = 0;
+        YeptrisDocument d = yeptris_parse_json(data, len, &st);
+        if (st == 0) {
+          size_t out_len = 0;
+          char *out = yeptris_serialize_json(d, &out_len);
+          if (out) yeptris_free(out);
+        }
+        yeptris_document_free(d);
+      },);
+      g_cur_op = "parsing";
+#endif
+
+#if HAVE_JANSSON
+      g_cur_op = "generation";
+      BENCH("jansson", "json", sizes[s], iters[s],, {
+        json_error_t err;
+        json_t *r = json_loadb(data, len, 0, &err);
+        if (r) {
+          char *out = json_dumps(r, JSON_COMPACT);
+          if (out) free(out);
+        }
+        json_decref(r);
+      },);
+      g_cur_op = "parsing";
 #endif
     }
 
@@ -177,6 +443,46 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         }
       },);
 #endif
+
+#if HAVE_YEPTRIS
+      g_cur_op = "generation";
+      BENCH("yeptris", "yaml", sizes[s], iters[s],, {
+        YeptrisStatus st = 0;
+        YeptrisDocument d = yeptris_parse(data, len, &st);
+        if (st == 0) {
+          size_t out_len = 0;
+          char *out = yeptris_serialize(d, &out_len);
+          if (out) yeptris_free(out);
+        }
+        yeptris_document_free(d);
+      },);
+      g_cur_op = "parsing";
+#endif
+
+#if HAVE_LIBYAML
+      g_cur_op = "generation";
+      BENCH("libyaml", "yaml", sizes[s], iters[s],, {
+        yaml_parser_t parser;
+        yaml_emitter_t emitter;
+        if (yaml_parser_initialize(&parser) && yaml_emitter_initialize(&emitter)) {
+          size_t cap = len * 8;
+          unsigned char *buf = malloc(cap);
+          size_t written = 0;
+          yaml_parser_set_input_string(&parser, (unsigned char *)data, len);
+          yaml_emitter_set_output_string(&emitter, buf, cap, &written);
+          yaml_event_t event;
+          int done = 0;
+          while (!done && yaml_parser_parse(&parser, &event)) {
+            done = (event.type == YAML_STREAM_END_EVENT);
+            if (!yaml_emitter_emit(&emitter, &event)) break;
+          }
+          yaml_emitter_delete(&emitter);
+          yaml_parser_delete(&parser);
+          free(buf);
+        }
+      },);
+      g_cur_op = "parsing";
+#endif
     }
 
     if (!strcmp(fmt, "toml")) {
@@ -191,6 +497,19 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         toml_result_t r = toml_parse(data, (int)len);
         toml_free(r);
       },);
+#endif
+
+#if HAVE_TEPTRIS
+      g_cur_op = "generation";
+      BENCH("teptris", "toml", sizes[s], iters[s],, {
+        teptris_document *d = NULL;
+        if (teptris_parse(data, len, NULL, &d) == TEPTRIS_OK) {
+          char *buf = NULL; size_t out_len = 0;
+          if (teptris_document_emit(d, &buf, &out_len) == TEPTRIS_OK && buf) free(buf);
+        }
+        teptris_document_free(d);
+      },);
+      g_cur_op = "parsing";
 #endif
     }
 
@@ -208,6 +527,36 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         cbor_item_t *item = cbor_load((const unsigned char *)data, len, &res);
         if (item) cbor_decref(&item);
       },);
+#endif
+
+#if HAVE_YEPTRIS
+      g_cur_op = "generation";
+      BENCH("yeptris", "cbor", sizes[s], iters[s],, {
+        YeptrisStatus st = 0;
+        YeptrisDocument d = yeptris_cbor_decode(data, len, 0, &st);
+        if (st == 0) {
+          size_t out_len = 0;
+          char *out = yeptris_cbor_encode(d, 0, &out_len);
+          if (out) yeptris_free(out);
+        }
+        yeptris_document_free(d);
+      },);
+      g_cur_op = "parsing";
+#endif
+
+#if HAVE_LIBCBOR
+      g_cur_op = "generation";
+      BENCH("libcbor", "cbor", sizes[s], iters[s],, {
+        struct cbor_load_result res;
+        cbor_item_t *item = cbor_load((const unsigned char *)data, len, &res);
+        if (item) {
+          unsigned char *buf = NULL; size_t out_len = 0;
+          cbor_serialize_alloc(item, &buf, &out_len);
+          if (buf) free(buf);
+          cbor_decref(&item);
+        }
+      },);
+      g_cur_op = "parsing";
 #endif
     }
 
@@ -256,8 +605,14 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
   }
 }
 
+void check_all(const char *dir);
+
 int main(int argc, char **argv) {
-  if (argc < 3) { fprintf(stderr, "usage: serialbench-c <fixtures> <out-yaml> [format]\n"); return 2; }
+  if (argc < 3) { fprintf(stderr, "usage: serialbench-c <fixtures> <out-yaml> [format|check]\n"); return 2; }
+  if (argc > 3 && !strcmp(argv[3], "check")) {
+    check_all(argv[1]);
+    return g_check_failed ? 1 : 0;
+  }
 #if HAVE_LIBXML2
   LIBXML_TEST_VERSION
 #endif
@@ -340,11 +695,16 @@ int main(int argc, char **argv) {
   fprintf(out, "    - {name: yeptris, format: cbor, version: '%s', features: {}}\n", yeptris_version());
 #endif
   fputs(ser_buf, out);
-  fprintf(out, "benchmark_result:\n  parsing:\n");
-  for (int i = 0; i < nrows; i++) {
-    if (strcmp(rows[i].fmt, "xslt") == 0) continue;
-    fprintf(out, "    - {adapter: %s, format: %s, data_size: %s, time_per_iteration: %.9f, iterations_per_second: %.6f}\n",
-            rows[i].name, rows[i].fmt, rows[i].size, rows[i].tpi, rows[i].ips);
+  static const char *sections[] = {"parsing", "generation", "xpath"};
+  fprintf(out, "benchmark_result:\n");
+  for (unsigned sec = 0; sec < sizeof(sections)/sizeof(sections[0]); sec++) {
+    fprintf(out, "  %s:\n", sections[sec]);
+    for (int i = 0; i < nrows; i++) {
+      if (strcmp(rows[i].fmt, "xslt") == 0) continue;
+      if (strcmp(rows[i].op, sections[sec])) continue;
+      fprintf(out, "    - {adapter: %s, format: %s, data_size: %s, time_per_iteration: %.9f, iterations_per_second: %.6f}\n",
+              rows[i].name, rows[i].fmt, rows[i].size, rows[i].tpi, rows[i].ips);
+    }
   }
   fprintf(out, "  xslt:\n");
   for (int i = 0; i < nrows; i++) {

@@ -33,10 +33,57 @@ void bench_jsonc(const char *dir, const char *want, void (*emit)(const char *, c
     free(data);
   }
 }
+
+extern const char *g_cur_op;
+extern int g_check_failed;
+
+void bench_jsonc_generation(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
+  if (want && strcmp(want, "json")) return;
+  static const char *sizes[] = {"small", "medium", "large"};
+  static const int iters[] = {10, 3, 1};
+  char path[512];
+  for (int s = 0; s < 3; s++) {
+    snprintf(path, sizeof path, "%s/%s.json", dir, sizes[s]);
+    size_t len; char *data = read_file_x(path, &len);
+    if (!data) continue;
+    for (int i = 0; i < 3; i++) {
+      struct json_object *o = json_tokener_parse(data);
+      if (o) { const char *out = json_object_to_json_string_ext(o, JSON_C_TO_STRING_PLAIN); (void)out; json_object_put(o); }
+    }
+    double t0 = now_x();
+    for (int i = 0; i < iters[s]; i++) {
+      struct json_object *o = json_tokener_parse(data);
+      if (o) { const char *out = json_object_to_json_string_ext(o, JSON_C_TO_STRING_PLAIN); (void)out; json_object_put(o); }
+    }
+    g_cur_op = "generation";
+    emit("json-c", "json", sizes[s], iters[s], now_x() - t0);
+    g_cur_op = "parsing";
+    free(data);
+  }
+}
+
+void bench_jsonc_check(const char *dir) {
+  static const char *sizes[] = {"small", "medium", "large"};
+  char path[512];
+  for (int s = 0; s < 3; s++) {
+    snprintf(path, sizeof path, "%s/%s.json", dir, sizes[s]);
+    size_t len; char *data = read_file_x(path, &len);
+    if (!data) continue;
+    struct json_object *o = json_tokener_parse(data);
+    int ok = o != NULL;
+    printf("CHECK json json-c %s count=-1 %s\n", sizes[s], ok ? "OK" : "FAIL");
+    if (!ok) g_check_failed = 1;
+    if (o) json_object_put(o);
+    free(data);
+  }
+}
 #else
 #include <stddef.h>
 void bench_jsonc(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
   if (want && strcmp(want, "json")) return; (void)dir; (void)emit; }
+void bench_jsonc_generation(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
+  if (want && strcmp(want, "json")) return; (void)dir; (void)emit; }
+void bench_jsonc_check(const char *dir) { (void)dir; }
 #endif
 
 #if HAVE_TINYCBOR
@@ -71,6 +118,41 @@ static void walk_tinycbor(CborValue *it) {
   }
 }
 
+static long walk_count_tinycbor(CborValue *it) {
+  long n = 0;
+  while (!cbor_value_at_end(it)) {
+    n++;
+    if (cbor_value_is_container(it)) {
+      CborValue rec;
+      cbor_value_enter_container(it, &rec);
+      n += walk_count_tinycbor(&rec);
+      cbor_value_leave_container(it, &rec);
+    } else {
+      cbor_value_advance(it);
+    }
+  }
+  return n;
+}
+
+extern int g_check_failed;
+
+void bench_tinycbor_check(const char *dir) {
+  static const char *sizes[] = {"small", "medium", "large"};
+  char path[512];
+  for (int s = 0; s < 3; s++) {
+    snprintf(path, sizeof path, "%s/%s.cbor", dir, sizes[s]);
+    size_t len; char *data = read_file_tc(path, &len);
+    if (!data) continue;
+    CborParser parser; CborValue it;
+    long n = -1;
+    int ok = cbor_parser_init((const uint8_t *)data, len, 0, &parser, &it) == CborNoError;
+    if (ok) n = walk_count_tinycbor(&it);
+    printf("CHECK cbor tinycbor %s count=%ld %s\n", sizes[s], n, ok && n > 0 ? "OK" : "FAIL");
+    if (!ok || n <= 0) g_check_failed = 1;
+    free(data);
+  }
+}
+
 void bench_tinycbor(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
   if (want && strcmp(want, "cbor")) return;
   static const char *sizes[] = {"small", "medium", "large"};
@@ -95,6 +177,41 @@ void bench_tinycbor(const char *dir, const char *want, void (*emit)(const char *
 }
 #else
 #include <string.h>
+static long walk_count_tinycbor(CborValue *it) {
+  long n = 0;
+  while (!cbor_value_at_end(it)) {
+    n++;
+    if (cbor_value_is_container(it)) {
+      CborValue rec;
+      cbor_value_enter_container(it, &rec);
+      n += walk_count_tinycbor(&rec);
+      cbor_value_leave_container(it, &rec);
+    } else {
+      cbor_value_advance(it);
+    }
+  }
+  return n;
+}
+
+extern int g_check_failed;
+
+void bench_tinycbor_check(const char *dir) {
+  static const char *sizes[] = {"small", "medium", "large"};
+  char path[512];
+  for (int s = 0; s < 3; s++) {
+    snprintf(path, sizeof path, "%s/%s.cbor", dir, sizes[s]);
+    size_t len; char *data = read_file_tc(path, &len);
+    if (!data) continue;
+    CborParser parser; CborValue it;
+    long n = -1;
+    int ok = cbor_parser_init((const uint8_t *)data, len, 0, &parser, &it) == CborNoError;
+    if (ok) n = walk_count_tinycbor(&it);
+    printf("CHECK cbor tinycbor %s count=%ld %s\n", sizes[s], n, ok && n > 0 ? "OK" : "FAIL");
+    if (!ok || n <= 0) g_check_failed = 1;
+    free(data);
+  }
+}
+
 void bench_tinycbor(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double)) {
   if (want && strcmp(want, "cbor")) return; (void)dir; (void)emit; }
 #endif
@@ -105,6 +222,7 @@ extern void bench_cpp_serializers(void (*ser)(const char *, const char *, const 
 void bench_extra(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double),
                  void (*ser)(const char *, const char *, const char *)) {
   bench_jsonc(dir, want, emit);
+  bench_jsonc_generation(dir, want, emit);
   bench_tinycbor(dir, want, emit);
   bench_cpp(dir, want, emit);
   bench_cpp_serializers(ser);
