@@ -40,11 +40,13 @@ void bench_jsonc(const char *dir, const char *want, void (*emit)(const char *, c
 #endif
 
 extern void bench_cpp(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double));
+extern void bench_cpp_serializers(void (*ser)(const char *, const char *, const char *));
 
 void bench_extra(const char *dir, const char *want, void (*emit)(const char *, const char *, const char *, int, double),
                  void (*ser)(const char *, const char *, const char *)) {
   bench_jsonc(dir, want, emit);
   bench_cpp(dir, want, emit);
+  bench_cpp_serializers(ser);
   int json_ok = !want || !strcmp(want, "json");
   int yaml_ok = !want || !strcmp(want, "yaml");
 #if HAVE_JSON_C

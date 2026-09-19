@@ -9,6 +9,12 @@
 #if HAVE_RYML
 #include <ryml.hpp>
 #endif
+#if HAVE_SIMDJSON
+#include <simdjson.h>
+#endif
+#if HAVE_PUGIXML
+#include <pugixml.hpp>
+#endif
 
 static char *read_file_cxx(const char *path, size_t *len) {
   FILE *f = fopen(path, "rb");
@@ -63,5 +69,46 @@ extern "C" void bench_cpp(const char *dir, const char *want, void (*emit)(const 
     emit("rapidyaml", "yaml", sizes[s], iters[s], now_cxx() - t0);
     free(buf); free(data);
   }
+#endif
+
+#if HAVE_SIMDJSON
+  if (!want || !strcmp(want, "json"))
+  for (int s = 0; s < 3; s++) {
+    snprintf(path, sizeof path, "%s/%s.json", dir, sizes[s]);
+    size_t len; char *data = read_file_cxx(path, &len);
+    if (!data) continue;
+    simdjson::dom::parser parser;
+    simdjson::padded_string pdoc(data, len);
+    for (int i = 0; i < 3; i++) { auto e = parser.parse(pdoc).value(); (void)e; }
+    double t0 = now_cxx();
+    for (int i = 0; i < iters[s]; i++) { auto e = parser.parse(pdoc).value(); (void)e; }
+    emit("simdjson", "json", sizes[s], iters[s], now_cxx() - t0);
+    free(data);
+  }
+#endif
+
+#if HAVE_PUGIXML
+  if (!want || !strcmp(want, "xml"))
+  for (int s = 0; s < 3; s++) {
+    snprintf(path, sizeof path, "%s/%s.xml", dir, sizes[s]);
+    size_t len; char *data = read_file_cxx(path, &len);
+    if (!data) continue;
+    for (int i = 0; i < 3; i++) { pugi::xml_document doc; doc.load_buffer(data, len); }
+    double t0 = now_cxx();
+    for (int i = 0; i < iters[s]; i++) { pugi::xml_document doc; doc.load_buffer(data, len); }
+    emit("pugixml", "xml", sizes[s], iters[s], now_cxx() - t0);
+    free(data);
+  }
+#endif
+}
+
+extern "C" void bench_cpp_serializers(void (*ser)(const char *, const char *, const char *)) {
+#if HAVE_SIMDJSON
+  ser("simdjson", "json", SIMDJSON_VERSION);
+#endif
+#if HAVE_PUGIXML
+  char v[16];
+  snprintf(v, sizeof v, "%d.%d", PUGIXML_VERSION / 1000, PUGIXML_VERSION % 1000 / 10);
+  ser("pugixml", "xml", v);
 #endif
 }

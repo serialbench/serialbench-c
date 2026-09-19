@@ -236,7 +236,8 @@ int main(int argc, char **argv) {
   dir_cache = argv[1];
   const char *want = argc > 3 ? argv[3] : NULL;
   for (unsigned i = 0; i < sizeof(all)/sizeof(all[0]); i++) {
-    if (want && strcmp(want, all[i])) continue;
+    /* xml invocation also runs the xslt leg: its rows land in the xml file */
+    if (want && strcmp(want, all[i]) && !(strcmp(want, "xml") == 0 && strcmp(all[i], "xslt") == 0)) continue;
     const char *ext = !strcmp(all[i], "xslt") ? "xml" : all[i];
     run_format(all[i], argv[1], ext);
   }
