@@ -44,7 +44,9 @@ jobs:
           msystem: UCRT64
           update: false
           install: >-
-            git make cmake gcc
+            git make gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-pkg-config
             mingw-w64-ucrt-x86_64-libxml2
             mingw-w64-ucrt-x86_64-libxslt
@@ -94,7 +96,7 @@ jobs:
           # and the msys cmake does not search /ucrt64 for the pacman libs
           TRIS_ARGS="$TRIS_ARGS -DUTF8PROC_LIB=/tmp/utf8prefix/lib/libutf8proc.a -DCMAKE_PREFIX_PATH=/ucrt64"
           # shellcheck disable=SC2086
-          cmake -B build -DCMAKE_BUILD_TYPE=Release $TRIS_ARGS
+          cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release $TRIS_ARGS
           cmake --build build
 
       - name: Load canonical fixtures
