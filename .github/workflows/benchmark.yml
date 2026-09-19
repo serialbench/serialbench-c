@@ -59,6 +59,10 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p /tmp/tris-libs
+          # native mingw cmake cannot read msys /tmp paths in -D args (they
+          # skip msys2 auto-conversion) — precompute windows-style paths
+          WUC64=$(cygpath -m /ucrt64)
+          WUTF8P=$(cygpath -m /tmp/utf8prefix)
           # utf8proc has no UCRT64 package and leptris hard-requires it at
           # configure time — build + install it BEFORE the tris cores
           git clone -q --depth 1 https://github.com/JuliaStrings/utf8proc.git /tmp/utf8proc
@@ -68,7 +72,7 @@ jobs:
           for repo in leptris yeptris teptris; do
             git clone -q --depth 1 https://github.com/leptris/$repo.git /tmp/$repo
             up=$(echo "$repo" | tr 'a-z' 'A-Z')
-            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 -D${up}_ENABLE_LTO=OFF -D${up}_BUILD_CLI=OFF -DCMAKE_PREFIX_PATH="/tmp/utf8prefix;/ucrt64" > /dev/null
+            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 -D${up}_ENABLE_LTO=OFF -D${up}_BUILD_CLI=OFF -DCMAKE_PREFIX_PATH="$WUTF8P;$WUC64" > /dev/null
             cmake --build /tmp/$repo/build -j"$(nproc)" 2>&1 | tail -40
             find /tmp/$repo/build -name '*.a' | grep -v CMake | while read -r lib; do
               cp "$lib" /tmp/tris-libs/ 2>/dev/null || true
@@ -88,13 +92,15 @@ jobs:
           CC: gcc
           CXX: g++
         run: |
-          TRIS_ARGS="-DLEPTRIS_LIB=/tmp/tris-libs/libleptris.a -DLEPTRIS_INC=/tmp/leptris/src/include \
-                     -DYEPTRIS_LIB=/tmp/tris-libs/libyeptris.a -DYEPTRIS_INC=/tmp/yeptris/src/include \
-                     -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated"
-          [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
-          # windows: apt/brew do not exist here — utf8proc is built from source,
-          # and the msys cmake does not search /ucrt64 for the pacman libs
-          TRIS_ARGS="$TRIS_ARGS -DUTF8PROC_LIB=/tmp/utf8prefix/lib/libutf8proc.a -DCMAKE_PREFIX_PATH=/ucrt64"
+          TL=$(cygpath -m /tmp/tris-libs); LP=$(cygpath -m /tmp/leptris/src/include)
+          YP=$(cygpath -m /tmp/yeptris/src/include); YG=$(cygpath -m /tmp/yeptris/build/generated)
+          TP=$(cygpath -m /tmp/teptris/src/include); UP=$(cygpath -m /tmp/utf8prefix)
+          UC=$(cygpath -m /ucrt64); TC=$(cygpath -m /tmp/tomlc17)
+          TRIS_ARGS="-DLEPTRIS_LIB=$TL/libleptris.a -DLEPTRIS_INC=$LP \
+                     -DYEPTRIS_LIB=$TL/libyeptris.a -DYEPTRIS_INC=$YP \
+                     -DTEPTRIS_LIB=$TL/libteptris.a -DTEPTRIS_INC=$TP -DCMAKE_C_FLAGS=-I$YG \
+                     -DUTF8PROC_LIB=$UP/lib/libutf8proc.a -DCMAKE_PREFIX_PATH=$UC"
+          [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=$TC"
           # shellcheck disable=SC2086
           cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release $TRIS_ARGS
           cmake --build build
