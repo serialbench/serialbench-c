@@ -57,20 +57,21 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p /tmp/tris-libs
+          # utf8proc has no UCRT64 package and leptris hard-requires it at
+          # configure time — build + install it BEFORE the tris cores
+          git clone -q --depth 1 https://github.com/JuliaStrings/utf8proc.git /tmp/utf8proc
+          cmake -S /tmp/utf8proc -B /tmp/utf8proc/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DUTF8PROC_ENABLE_TESTING=OFF -DCMAKE_INSTALL_PREFIX=/tmp/utf8prefix > /dev/null
+          cmake --build /tmp/utf8proc/build -j"$(nproc)" 2>&1 | tail -1
+          cmake --install /tmp/utf8proc/build > /dev/null
           for repo in leptris yeptris teptris; do
             git clone -q --depth 1 https://github.com/leptris/$repo.git /tmp/$repo
             up=$(echo "$repo" | tr 'a-z' 'A-Z')
-            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 -D${up}_ENABLE_LTO=OFF > /dev/null
+            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 -D${up}_ENABLE_LTO=OFF -DCMAKE_PREFIX_PATH=/tmp/utf8prefix > /dev/null
             cmake --build /tmp/$repo/build -j"$(nproc)" 2>&1 | tail -1
             find /tmp/$repo/build -name '*.a' | grep -v CMake | while read -r lib; do
               cp "$lib" /tmp/tris-libs/ 2>/dev/null || true
             done
           done
-          # utf8proc has no UCRT64 package — build it with the tris cores
-          git clone -q --depth 1 https://github.com/JuliaStrings/utf8proc.git /tmp/utf8proc
-          cmake -S /tmp/utf8proc -B /tmp/utf8proc/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DUTF8PROC_ENABLE_TESTING=OFF > /dev/null
-          cmake --build /tmp/utf8proc/build -j"$(nproc)" 2>&1 | tail -1
-          find /tmp/utf8proc/build -name 'libutf8proc*.a' | while read -r lib; do cp "$lib" /tmp/tris-libs/; done
           ls /tmp/tris-libs/
 
       - name: Fetch tomlc17
@@ -90,7 +91,7 @@ jobs:
                      -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated"
           [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
           # windows: apt/brew do not exist here — utf8proc is built from source
-          TRIS_ARGS="$TRIS_ARGS -DUTF8PROC_LIB=/tmp/tris-libs/libutf8proc.a"
+          TRIS_ARGS="$TRIS_ARGS -DUTF8PROC_LIB=/tmp/utf8prefix/lib/libutf8proc.a"
           # shellcheck disable=SC2086
           cmake -B build -DCMAKE_BUILD_TYPE=Release $TRIS_ARGS
           cmake --build build
