@@ -29,13 +29,13 @@ jobs:
       - id: set-matrix
         run: |
           echo 'compilers=["gcc", "clang"]' >> $GITHUB_OUTPUT
-          echo 'platforms=["ubuntu-24.04", "ubuntu-24.04-arm", "macos-15", "macos-26-intel", "macos-26"]' >> $GITHUB_OUTPUT
+          echo 'platforms=["ubuntu-24.04", "ubuntu-24.04-arm", "ubuntu-22.04", "macos-15", "macos-26-intel", "macos-26"]' >> $GITHUB_OUTPUT
           echo "run-date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
   benchmark:
     runs-on: ${{ matrix.platform }}
     needs: setup
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -44,21 +44,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install libxml2
+      - name: Install system field
         run: |
-          if command -v apt-get >/dev/null; then sudo apt-get update && sudo apt-get install -y libxml2-dev;
-          elif command -v brew >/dev/null; then brew install libxml2; fi
+          if command -v apt-get >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt1-dev libyaml-dev libjansson-dev libjson-c-dev nlohmann-json3-dev
+          elif command -v brew >/dev/null; then
+            brew install libxml2 libxslt libyaml jansson json-c nlohmann-json
+          fi
         shell: bash
 
-      - name: Build
+      - name: Build tris cores from source
+        run: |
+          for repo in leptris yeptris teptris; do
+            git clone -q --depth 1 https://github.com/leptris/$repo.git /tmp/$repo
+            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 > /dev/null
+            cmake --build /tmp/$repo/build -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)" 2>&1 | tail -1
+          done
+        shell: bash
+
+      - name: Fetch tomlc17
+        run: |
+          git clone -q --depth 1 https://github.com/serge-rgb/tomlc17.git /tmp/tomlc17 || \
+          git clone -q --depth 1 https://github.com/cebix/tomlc17.git /tmp/tomlc17 || true
+          ls /tmp/tomlc17/src/tomlc17.h 2>/dev/null || echo "tomlc17 unavailable"
+        shell: bash
+
+      - name: Build harness
         env:
           CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
+          CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
         run: |
-          EXTRA_ARGS=""
+          TRIS_ARGS="-DLEPTRIS_DIR=/tmp/leptris/build -DLEPTRIS_INC=/tmp/leptris/src/include \
+                     -DYEPTRIS_DIR=/tmp/yeptris/build -DYEPTRIS_INC=/tmp/yeptris/src/include;/tmp/yeptris/build/generated \
+                     -DTEPTRIS_DIR=/tmp/teptris/build -DTEPTRIS_INC=/tmp/teptris/src/include"
+          [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
+          PREFIX_ARGS=""
           if command -v brew >/dev/null; then
-            EXTRA_ARGS="-DCMAKE_PREFIX_PATH=$(brew --prefix libxml2)"
+            PREFIX_ARGS="-DCMAKE_PREFIX_PATH=$(brew --prefix libxml2);$(brew --prefix libxslt);$(brew --prefix jansson);$(brew --prefix json-c);$(brew --prefix nlohmann-json);$(brew --prefix libyaml)"
           fi
-          cmake -B build -DCMAKE_BUILD_TYPE=Release $EXTRA_ARGS
+          # shellcheck disable=SC2086
+          cmake -B build -DCMAKE_BUILD_TYPE=Release $TRIS_ARGS $PREFIX_ARGS
           cmake --build build
         shell: bash
 
@@ -68,7 +93,7 @@ jobs:
           (cd fixtures && sha256sum -c SHA256SUMS) || (cd fixtures && shasum -a 256 -c SHA256SUMS)
         shell: bash
 
-      - name: Benchmark xml
+      - name: Benchmark all formats
         continue-on-error: true
         shell: bash
         env:
@@ -76,21 +101,20 @@ jobs:
           SERIALBENCH_C_VERSION: ${{ matrix.compiler }}
           DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
         run: |
-          if [ "${{ github.run_attempt }}" -gt 1 ] && .github/scripts/format-status.sh xml ${{ matrix.compiler }} ${{ matrix.platform }}; then
-            echo "xml already in the data repo — skipping (gap-filling rerun)"
+          if [ "${{ github.run_attempt }}" -gt 1 ] && .github/scripts/format-status.sh all ${{ matrix.compiler }} ${{ matrix.platform }}; then
+            echo "already in the data repo — skipping (gap-filling rerun)"
             exit 0
           fi
-          mkdir -p results/xml
-          C_VERSION="${{ matrix.compiler }}" ./build/serialbench-c fixtures results/xml/results.yaml
+          mkdir -p results/all
+          C_VERSION="${{ matrix.compiler }}" ./build/serialbench-c fixtures results/all/results.yaml
 
-      - name: Push xml to data repo
+      - name: Push to data repo
         if: ${{ !cancelled() }}
         continue-on-error: true
         env:
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
           DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
-          C_VERSION: ${{ matrix.compiler }}
-        run: .github/scripts/push-to-data.sh xml ${{ matrix.compiler }} ${{ matrix.platform }}
+        run: .github/scripts/push-to-data.sh all ${{ matrix.compiler }} ${{ matrix.platform }}
         shell: bash
 
       - name: Verify leg completeness
@@ -100,9 +124,9 @@ jobs:
           DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
           DATA_RUN_DATE: ${{ needs.setup.outputs.run-date }}
         run: |
-          if .github/scripts/format-status.sh xml "${{ matrix.compiler }}" "${{ matrix.platform }}"; then
-            echo "xml: in data repo"
+          if .github/scripts/format-status.sh all "${{ matrix.compiler }}" "${{ matrix.platform }}"; then
+            echo "results: in data repo"
           else
-            echo "::error::xml never pushed — failing the leg so autoheal fills the gap"
+            echo "::error::results never pushed — failing the leg so autoheal fills the gap"
             exit 1
           fi
