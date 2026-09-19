@@ -52,7 +52,6 @@ jobs:
             mingw-w64-ucrt-x86_64-jansson
             mingw-w64-ucrt-x86_64-json-c
             mingw-w64-ucrt-x86_64-nlohmann-json
-            mingw-w64-ucrt-x86_64-utf8proc
 
       - name: Build tris cores from source
         shell: msys2 {0}
@@ -67,6 +66,11 @@ jobs:
               cp "$lib" /tmp/tris-libs/ 2>/dev/null || true
             done
           done
+          # utf8proc has no UCRT64 package — build it with the tris cores
+          git clone -q --depth 1 https://github.com/JuliaStrings/utf8proc.git /tmp/utf8proc
+          cmake -S /tmp/utf8proc -B /tmp/utf8proc/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DUTF8PROC_ENABLE_TESTING=OFF > /dev/null
+          cmake --build /tmp/utf8proc/build -j"$(nproc)" 2>&1 | tail -1
+          find /tmp/utf8proc/build -name 'libutf8proc*.a' | while read -r lib; do cp "$lib" /tmp/tris-libs/; done
           ls /tmp/tris-libs/
 
       - name: Fetch tomlc17
@@ -83,7 +87,8 @@ jobs:
         run: |
           TRIS_ARGS="-DLEPTRIS_LIB=/tmp/tris-libs/libleptris.a -DLEPTRIS_INC=/tmp/leptris/src/include \
                      -DYEPTRIS_LIB=/tmp/tris-libs/libyeptris.a -DYEPTRIS_INC=/tmp/yeptris/src/include \
-                     -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated"
+                     -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated \
+                     -DUTF8PROC_LIB=/tmp/tris-libs/libutf8proc.a"
           [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
           # shellcheck disable=SC2086
           cmake -B build -DCMAKE_BUILD_TYPE=Release $TRIS_ARGS
@@ -206,7 +211,8 @@ jobs:
         run: |
           TRIS_ARGS="-DLEPTRIS_LIB=/tmp/tris-libs/libleptris.a -DLEPTRIS_INC=/tmp/leptris/src/include \
                      -DYEPTRIS_LIB=/tmp/tris-libs/libyeptris.a -DYEPTRIS_INC=/tmp/yeptris/src/include \
-                     -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated"
+                     -DTEPTRIS_LIB=/tmp/tris-libs/libteptris.a -DTEPTRIS_INC=/tmp/teptris/src/include -DCMAKE_C_FLAGS=-I/tmp/yeptris/build/generated \
+                     -DUTF8PROC_LIB=/tmp/tris-libs/libutf8proc.a"
           [ -f /tmp/tomlc17/src/tomlc17.h ] && TRIS_ARGS="$TRIS_ARGS -DTOMLC17_DIR=/tmp/tomlc17"
           PREFIX_ARGS=""
           if command -v brew >/dev/null; then
