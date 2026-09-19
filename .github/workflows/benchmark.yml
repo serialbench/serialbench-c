@@ -47,9 +47,9 @@ jobs:
       - name: Install system field
         run: |
           if command -v apt-get >/dev/null; then
-            sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt1-dev libyaml-dev libjansson-dev libjson-c-dev nlohmann-json3-dev
+            sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt1-dev libyaml-dev libjansson-dev libjson-c-dev nlohmann-json3-dev libutf8proc-dev
           elif command -v brew >/dev/null; then
-            brew install libxml2 libxslt libyaml jansson json-c nlohmann-json
+            brew install libxml2 libxslt libyaml jansson json-c nlohmann-json utf8proc
           fi
         shell: bash
 
