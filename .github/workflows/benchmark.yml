@@ -66,7 +66,7 @@ jobs:
           for repo in leptris yeptris teptris; do
             git clone -q --depth 1 https://github.com/leptris/$repo.git /tmp/$repo
             up=$(echo "$repo" | tr 'a-z' 'A-Z')
-            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 -D${up}_ENABLE_LTO=OFF -DCMAKE_PREFIX_PATH="/tmp/utf8prefix;/ucrt64" > /dev/null
+            cmake -S /tmp/$repo -B /tmp/$repo/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_STANDARD=11 -D${up}_ENABLE_LTO=OFF -D${up}_BUILD_CLI=OFF -DCMAKE_PREFIX_PATH="/tmp/utf8prefix;/ucrt64" > /dev/null
             cmake --build /tmp/$repo/build -j"$(nproc)" 2>&1 | tail -40
             find /tmp/$repo/build -name '*.a' | grep -v CMake | while read -r lib; do
               cp "$lib" /tmp/tris-libs/ 2>/dev/null || true
