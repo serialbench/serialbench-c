@@ -36,6 +36,15 @@
 #if HAVE_JANSSON
 #include <jansson.h>
 #endif
+#if HAVE_YYJSON
+#include <yyjson.h>
+#endif
+#if HAVE_CJSON
+#include <cJSON.h>
+#endif
+#if HAVE_EXPAT
+#include <expat.h>
+#endif
 #if HAVE_TOMLC17
 #include <tomlc17.h>
 #endif
@@ -95,6 +104,16 @@ static double now_sec(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC,
 static const char *XPATH_QUERIES[] = {"//user | //record", "//user[@id='101']", "//preferences/theme"};
 int g_check_failed = 0;
 
+#if HAVE_EXPAT
+/* expat is SAX-only: count start elements as the parse work. The count
+ * equals the DOM element count (expat fires StartElement for empty
+ * elements too), so it participates in the xml count gate. */
+static void XMLCALL expat_start_count(void *user, const XML_Char *name, const XML_Char **atts) {
+  (void)name; (void)atts;
+  (*(long *)user)++;
+}
+#endif
+
 static void check_line(const char *fmt, const char *adapter, const char *size, int ok, long count) {
   if (ok) printf("CHECK %s %s %s count=%ld OK\n", fmt, adapter, size, count);
   else { printf("CHECK %s %s %s FAIL\n", fmt, adapter, size); g_check_failed = 1; }
@@ -145,6 +164,20 @@ void check_all(const char *dir) {
           if (d) xmlFreeDoc(d);
         }
 #endif
+#if HAVE_EXPAT
+        if (!strcmp(fmt, "xml")) {
+          XML_Parser p = XML_ParserCreate(NULL);
+          long n = -1;
+          if (p) {
+            long count = 0;
+            XML_SetUserData(p, &count);
+            XML_SetElementHandler(p, expat_start_count, NULL);
+            n = XML_Parse(p, data, (int)len, 1) == XML_STATUS_OK ? count : -1;
+            XML_ParserFree(p);
+          }
+          check_line(fmt, "expat", sizes[s], n > 0, n);
+        }
+#endif
       }
 
       if (!strcmp(fmt, "json")) {
@@ -165,6 +198,20 @@ void check_all(const char *dir) {
            * reference — iterators are off-limits with both loaded */
           check_line(fmt, "jansson", sizes[s], r != NULL, -1);
           if (r) json_decref(r);
+        }
+#endif
+#if HAVE_YYJSON
+        {
+          yyjson_doc *doc = yyjson_read(data, len, 0);
+          check_line(fmt, "yyjson", sizes[s], doc != NULL, -1);
+          if (doc) yyjson_doc_free(doc);
+        }
+#endif
+#if HAVE_CJSON
+        {
+          cJSON *c = cJSON_ParseWithLength(data, len);
+          check_line(fmt, "cjson", sizes[s], c != NULL, -1);
+          if (c) cJSON_Delete(c);
         }
 #endif
       }
@@ -327,6 +374,18 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
       },);
       g_cur_op = "parsing";
 #endif
+#if HAVE_EXPAT
+      BENCH("expat", "xml", sizes[s], iters[s],, {
+        XML_Parser p = XML_ParserCreate(NULL);
+        if (p) {
+          long count = 0;
+          XML_SetUserData(p, &count);
+          XML_SetElementHandler(p, expat_start_count, NULL);
+          XML_Parse(p, data, (int)len, 1);
+          XML_ParserFree(p);
+        }
+      },);
+#endif
     }
 
     if (!strcmp(fmt, "html")) {
@@ -388,6 +447,39 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         json_t *r = json_loadb(data, len, 0, &err);
         if (r) json_decref(r);
       },);
+#endif
+#if HAVE_YYJSON
+      BENCH("yyjson", "json", sizes[s], iters[s],, {
+        yyjson_doc *doc = yyjson_read(data, len, 0);
+        if (doc) yyjson_doc_free(doc);
+      },);
+      g_cur_op = "generation";
+      BENCH("yyjson", "json", sizes[s], iters[s],, {
+        yyjson_doc *doc = yyjson_read(data, len, 0);
+        if (doc) {
+          size_t wn = 0;
+          char *wout = yyjson_val_write(yyjson_doc_get_root(doc), 0, &wn);
+          if (wout) free(wout);
+          yyjson_doc_free(doc);
+        }
+      },);
+      g_cur_op = "parsing";
+#endif
+#if HAVE_CJSON
+      BENCH("cjson", "json", sizes[s], iters[s],, {
+        cJSON *c = cJSON_ParseWithLength(data, len);
+        if (c) cJSON_Delete(c);
+      },);
+      g_cur_op = "generation";
+      BENCH("cjson", "json", sizes[s], iters[s],, {
+        cJSON *c = cJSON_ParseWithLength(data, len);
+        if (c) {
+          char *cout = cJSON_PrintUnformatted(c);
+          if (cout) free(cout);
+          cJSON_Delete(c);
+        }
+      },);
+      g_cur_op = "parsing";
 #endif
 
 #if HAVE_YEPTRIS
@@ -659,6 +751,15 @@ int main(int argc, char **argv) {
   fprintf(out, "serializers:\n");
 #if HAVE_LEPTRIS
   fprintf(out, "    - {name: leptris, format: xml, version: '%s', features: {xpath: true, html5: true, xslt: true}}\n", leptris_version());
+#if HAVE_YYJSON
+  fprintf(out, "    - {name: yyjson, format: json, version: '%s', features: {}}\n", yyjson_version());
+#endif
+#if HAVE_CJSON
+  fprintf(out, "    - {name: cjson, format: json, version: '%s', features: {}}\n", cJSON_Version());
+#endif
+#if HAVE_EXPAT
+  fprintf(out, "    - {name: expat, format: xml, version: '%s', features: {}}\n", XML_ExpatVersion());
+#endif
 #endif
 #if HAVE_LIBXML2
   fprintf(out, "    - {name: libxml2, format: xml, version: '%s', features: {xpath: true}}\n", LIBXML_DOTTED_VERSION);
