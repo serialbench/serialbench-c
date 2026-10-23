@@ -121,7 +121,7 @@ jobs:
           set -o pipefail
           ./build/serialbench-c fixtures /dev/null check | tee /tmp/check.log
           grep -q "CHECK FAILED" /tmp/check.log && { echo "::error::correctness gate failed"; exit 1; }
-          for spec in "xml leptris libxml2 pugixml" "html leptris libxml2"; do
+          for spec in "xml leptris libxml2 pugixml expat" "html leptris libxml2"; do
             set -- $spec; fmt=$1; shift
             ads=$(printf "%s|" "$@"); ads=${ads%|}
             for sz in small medium large; do
@@ -186,9 +186,9 @@ jobs:
       - name: Install system field
         run: |
           if command -v apt-get >/dev/null; then
-            sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt1-dev libyaml-dev libjansson-dev libjson-c-dev nlohmann-json3-dev libutf8proc-dev
+            sudo apt-get update && sudo apt-get install -y libxml2-dev libxslt1-dev libyaml-dev libjansson-dev libjson-c-dev nlohmann-json3-dev libutf8proc-dev libexpat1-dev
           elif command -v brew >/dev/null; then
-            brew install libxml2 libxslt libyaml jansson json-c nlohmann-json utf8proc
+            brew install libxml2 libxslt libyaml jansson json-c nlohmann-json utf8proc expat
           fi
         shell: bash
 

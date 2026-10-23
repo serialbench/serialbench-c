@@ -47,6 +47,14 @@ FetchContent_Declare(libcbor GIT_REPOSITORY https://github.com/PJK/libcbor GIT_T
 FetchContent_MakeAvailable(libcbor)
 FetchContent_Declare(tinycbor GIT_REPOSITORY https://github.com/intel/tinycbor GIT_TAG v0.6.1 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(tinycbor)
+FetchContent_Declare(yyjson GIT_REPOSITORY https://github.com/ibireme/yyjson GIT_TAG 0.13.0 GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(yyjson)
+set(JSONC14N_BUILD_TESTS OFF CACHE INTERNAL "")
+FetchContent_Declare(cJSON GIT_REPOSITORY https://github.com/DaveGamble/cJSON GIT_TAG v1.7.19 GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(cJSON)
+# expat is common enough to prefer the system package; FetchContent only
+# as a fallback so the legs keep working on thin images.
+find_package(EXPAT QUIET)
 
 add_executable(serialbench-c src/bench.c src/bench_extra.c src/bench_cpp.cpp)
 if(ryml_FOUND OR TARGET ryml)
@@ -77,6 +85,22 @@ endif()
 if(TARGET libcbor::libcbor)
   target_compile_definitions(serialbench-c PRIVATE HAVE_LIBCBOR=1)
   target_link_libraries(serialbench-c PRIVATE libcbor::libcbor)
+endif()
+if(TARGET yyjson)
+  target_compile_definitions(serialbench-c PRIVATE HAVE_YYJSON=1)
+  target_link_libraries(serialbench-c PRIVATE yyjson)
+endif()
+if(TARGET cjson)
+  # cJSON uses directory-level include_directories (old style), which does
+  # not propagate through FetchContent target_link_libraries — add its
+  # source dir (cJSON.h lives at the repo root) explicitly.
+  target_include_directories(serialbench-c PRIVATE ${cJSON_SOURCE_DIR})
+  target_compile_definitions(serialbench-c PRIVATE HAVE_CJSON=1)
+  target_link_libraries(serialbench-c PRIVATE cjson)
+endif()
+if(EXPAT_FOUND)
+  target_compile_definitions(serialbench-c PRIVATE HAVE_EXPAT=1)
+  target_link_libraries(serialbench-c PRIVATE EXPAT::EXPAT)
 endif()
 # tinycbor ships no CMakeLists (v0.6.1): compile the decode path directly
 if(EXISTS "${tinycbor_SOURCE_DIR}/src/cborparser.c")
