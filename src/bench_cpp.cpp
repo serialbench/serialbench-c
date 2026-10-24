@@ -132,16 +132,21 @@ extern "C" void bench_cpp(const char *dir, const char *want, void (*emit)(const 
     snprintf(path, sizeof path, "%s/%s.xml", dir, sizes[s]);
     size_t len; char *data = read_file_cxx(path, &len);
     if (!data) continue;
-    for (int i = 0; i < 3; i++) { pugi::xml_document doc; doc.load_buffer(data, len); }
+    /* parse_ws_pcdata: pugixml's default drops whitespace-only text
+       nodes, which would shrink the DOM ~1.8x vs DOM-compliant
+       parsers (leptris, libxml2) on indented fixtures and skew the
+       comparison; see leptris#1842 */
+    const unsigned pugi_opts = pugi::parse_default | pugi::parse_ws_pcdata;
+    for (int i = 0; i < 3; i++) { pugi::xml_document doc; doc.load_buffer(data, len, pugi_opts); }
     double t0 = now_cxx();
-    for (int i = 0; i < iters[s]; i++) { pugi::xml_document doc; doc.load_buffer(data, len); }
+    for (int i = 0; i < iters[s]; i++) { pugi::xml_document doc; doc.load_buffer(data, len, pugi_opts); }
     emit("pugixml", "xml", sizes[s], iters[s], now_cxx() - t0);
 
     g_cur_op = "generation";
-    for (int i = 0; i < 3; i++) { pugi::xml_document doc; doc.load_buffer(data, len); pugi_buf_writer w; doc.print(w); }
+    for (int i = 0; i < 3; i++) { pugi::xml_document doc; doc.load_buffer(data, len, pugi_opts); pugi_buf_writer w; doc.print(w); }
     t0 = now_cxx();
     for (int i = 0; i < iters[s]; i++) {
-      pugi::xml_document doc; doc.load_buffer(data, len);
+      pugi::xml_document doc; doc.load_buffer(data, len, pugi_opts);
       pugi_buf_writer w;
       doc.print(w);
     }
@@ -149,10 +154,10 @@ extern "C" void bench_cpp(const char *dir, const char *want, void (*emit)(const 
 
     g_cur_op = "xpath";
     static const char *qs[] = {"//user | //record", "//user[@id='101']", "//preferences/theme"};
-    for (int i = 0; i < 3; i++) { pugi::xml_document doc; doc.load_buffer(data, len); for (const char *q : qs) doc.select_nodes(q); }
+    for (int i = 0; i < 3; i++) { pugi::xml_document doc; doc.load_buffer(data, len, pugi_opts); for (const char *q : qs) doc.select_nodes(q); }
     t0 = now_cxx();
     for (int i = 0; i < iters[s]; i++) {
-      pugi::xml_document doc; doc.load_buffer(data, len);
+      pugi::xml_document doc; doc.load_buffer(data, len, pugi_opts);
       for (const char *q : qs) doc.select_nodes(q);
     }
     emit("pugixml", "xml", sizes[s], iters[s], now_cxx() - t0);
@@ -171,7 +176,7 @@ extern "C" void bench_cpp_check(const char *dir) {
     size_t len; char *data = read_file_cxx(path, &len);
     if (!data) continue;
     pugi::xml_document doc;
-    pugi::xml_parse_result r = doc.load_buffer(data, len);
+    pugi::xml_parse_result r = doc.load_buffer(data, len, pugi::parse_default | pugi::parse_ws_pcdata);
     long n = r ? (long)doc.select_nodes("//*").size() : -1;
     printf("CHECK xml pugixml %s count=%ld %s\n", sizes[s], n, r && n > 0 ? "OK" : "FAIL");
     if (!r || n <= 0) g_check_failed = 1;
