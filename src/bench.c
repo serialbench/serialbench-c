@@ -752,7 +752,11 @@ int main(int argc, char **argv) {
 #if HAVE_LEPTRIS
   fprintf(out, "    - {name: leptris, format: xml, version: '%s', features: {xpath: true, html5: true, xslt: true}}\n", leptris_version());
 #if HAVE_YYJSON
-  fprintf(out, "    - {name: yyjson, format: json, version: '%s', features: {}}\n", yyjson_version());
+  /* yyjson_version() returns a packed uint32 (major<<16|minor<<8|patch),
+     not a string — %s on it is a wild-pointer dereference */
+  unsigned yyjson_v = yyjson_version();
+  fprintf(out, "    - {name: yyjson, format: json, version: '%u.%u.%u', features: {}}\n",
+          yyjson_v >> 16, (yyjson_v >> 8) & 0xffu, yyjson_v & 0xffu);
 #endif
 #if HAVE_CJSON
   fprintf(out, "    - {name: cjson, format: json, version: '%s', features: {}}\n", cJSON_Version());
