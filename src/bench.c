@@ -21,12 +21,14 @@
 #endif
 #if HAVE_TEPTRIS
 #include <teptris/teptris.h>
+#include <teptris/schema.h>
 #endif
 #if HAVE_LIBXML2
 #include <libxml/parser.h>
 #include <libxml/HTMLparser.h>
 #include <libxml/HTMLtree.h>
 #include <libxml/tree.h>
+#include <libxml/xmlschemastypes.h>
 #endif
 #if HAVE_LIBXSLT
 #include <libxslt/xslt.h>
@@ -102,6 +104,13 @@ static double now_sec(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC,
 } while (0)
 
 static const char *XPATH_QUERIES[] = {"//user | //record", "//user[@id='101']", "//preferences/theme"};
+/* schema fixtures are named by document shape, not by size:
+   small=config, medium=users, large=dataset */
+static const char *schema_stem(const char *size) {
+  if (!strcmp(size, "small")) return "config";
+  if (!strcmp(size, "medium")) return "users";
+  return "dataset";
+}
 int g_check_failed = 0;
 
 #if HAVE_EXPAT
@@ -386,6 +395,77 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         }
       },);
 #endif
+
+      /* validation: schemas are per-size (config/users/dataset.* match
+         the canonical document shapes); compile is amortized outside
+         the loop, parse+validate are the per-iteration work */
+      g_cur_op = "validation";
+#if HAVE_LEPTRIS
+      {
+        char spath[512];
+        snprintf(spath, sizeof spath, "%s/%s.xsd", dir, schema_stem(sizes[s]));
+        size_t slen; char *sdata = read_file(spath, &slen);
+        if (sdata) {
+          LeptrisStatus st = LEPTRIS_OK;
+          LeptrisXsdSchema schema = leptris_xsd_compile(sdata, slen, &st);
+          if (schema && st == LEPTRIS_OK) {
+            BENCH("leptris-xsd", "xml", sizes[s], iters[s],, {
+              LeptrisStatus vst = LEPTRIS_OK;
+              LeptrisDocument d = leptris_parse_string(data, len, &vst);
+              if (vst == LEPTRIS_OK) {
+                if (leptris_xsd_validate(schema, d) != 1) g_check_failed = 1;
+                leptris_document_free(d);
+              }
+            },);
+          }
+          if (schema) leptris_xsd_free(schema);
+          free(sdata);
+        }
+        snprintf(spath, sizeof spath, "%s/%s.sch", dir, schema_stem(sizes[s]));
+        sdata = read_file(spath, &slen);
+        if (sdata) {
+          LeptrisStatus st = LEPTRIS_OK;
+          LeptrisSchematron sch = leptris_schematron_parse(sdata, slen, &st);
+          if (sch && st == LEPTRIS_OK) {
+            BENCH("leptris-schematron", "xml", sizes[s], iters[s],, {
+              LeptrisStatus vst = LEPTRIS_OK;
+              LeptrisDocument d = leptris_parse_string(data, len, &vst);
+              if (vst == LEPTRIS_OK) {
+                LeptrisDocument svrl = leptris_schematron_validate(sch, d);
+                if (svrl) leptris_document_free(svrl);
+                leptris_document_free(d);
+              }
+            },);
+          }
+          if (sch) leptris_schematron_free(sch);
+          free(sdata);
+        }
+      }
+#endif
+#if HAVE_LIBXML2
+      {
+        char spath[512];
+        snprintf(spath, sizeof spath, "%s/%s.xsd", dir, schema_stem(sizes[s]));
+        xmlSchemaParserCtxtPtr pctx = xmlSchemaNewParserCtxt(spath);
+        xmlSchemaPtr schema = pctx ? xmlSchemaParse(pctx) : NULL;
+        if (schema) {
+          BENCH("libxml2-xsd", "xml", sizes[s], iters[s],, {
+            xmlDocPtr d = xmlReadMemory(data, (int)len, NULL, NULL, 0);
+            if (d) {
+              xmlSchemaValidCtxtPtr vctx = xmlSchemaNewValidCtxt(schema);
+              if (vctx) {
+                if (xmlSchemaValidateDoc(vctx, d) != 0) g_check_failed = 1;
+                xmlSchemaFreeValidCtxt(vctx);
+              }
+              xmlFreeDoc(d);
+            }
+          },);
+        }
+        if (pctx) xmlSchemaFreeParserCtxt(pctx);
+        if (schema) xmlSchemaFree(schema);
+      }
+#endif
+      g_cur_op = "parsing";
     }
 
     if (!strcmp(fmt, "html")) {
@@ -510,6 +590,34 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
       },);
       g_cur_op = "parsing";
 #endif
+
+#if HAVE_YEPTRIS
+      g_cur_op = "validation";
+      {
+        char spath[512];
+        snprintf(spath, sizeof spath, "%s/%s.schema.json", dir, schema_stem(sizes[s]));
+        size_t slen; char *sdata = read_file(spath, &slen);
+        if (sdata) {
+          yeptris_schema *schema = yeptris_schema_compile(sdata, slen);
+          if (schema) {
+            BENCH("yeptris-schema", "json", sizes[s], iters[s],, {
+              yeptris_validate_report *rep = NULL;
+              if (yeptris_schema_validate(schema, data, len, &rep) == YEPTRIS_OK) {
+                /* 0 diagnostics = valid; a fixture that stops
+                   validating is a schema/fixture contract break */
+                if (rep && yeptris_validate_report_count(rep) > 0) g_check_failed = 1;
+                yeptris_validate_report_free(rep);
+              } else {
+                g_check_failed = 1;
+              }
+            },);
+          }
+          if (schema) yeptris_schema_free(schema);
+          free(sdata);
+        }
+      }
+      g_cur_op = "parsing";
+#endif
     }
 
     if (!strcmp(fmt, "yaml")) {
@@ -601,6 +709,38 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         }
         teptris_document_free(d);
       },);
+      g_cur_op = "parsing";
+#endif
+
+#if HAVE_TEPTRIS
+      g_cur_op = "validation";
+      {
+        char spath[512];
+        snprintf(spath, sizeof spath, "%s/%s.schema.json", dir, schema_stem(sizes[s]));
+        size_t slen; char *sdata = read_file(spath, &slen);
+        if (sdata) {
+          teptris_schema *schema = NULL; char *diag = NULL; size_t diag_len = 0;
+          if (teptris_schema_compile(sdata, slen, &schema, &diag, &diag_len) == TEPTRIS_OK && schema) {
+            BENCH("teptris-schema", "toml", sizes[s], iters[s],, {
+              teptris_document *d = NULL;
+              if (teptris_parse(data, len, NULL, &d) == TEPTRIS_OK && d) {
+                char *errs = NULL; size_t errs_len = 0;
+                if (teptris_schema_validate_doc(schema, d, &errs, &errs_len) == TEPTRIS_OK) {
+                  /* "[]" = valid; anything collected is a contract break */
+                  if (errs && errs_len > 2) g_check_failed = 1;
+                  free(errs);
+                } else {
+                  g_check_failed = 1;
+                }
+              }
+              teptris_document_free(d);
+            },);
+          }
+          if (diag) teptris_diag_free(diag);
+          if (schema) teptris_schema_free(schema);
+          free(sdata);
+        }
+      }
       g_cur_op = "parsing";
 #endif
     }
@@ -747,7 +887,7 @@ int main(int argc, char **argv) {
   );
   fprintf(out, "  runtime_version: %s\n", getenv("SERIALBENCH_C_VERSION") ? getenv("SERIALBENCH_C_VERSION") : "native");
   fprintf(out, "benchmark_config:\n  name: c-full\n  formats: [xml, html, json, yaml, toml]\n  operations: [parsing");
-  fprintf(out, ", xslt]\n");
+  fprintf(out, ", generation, xpath, validation, xslt]\n");
   fprintf(out, "serializers:\n");
 #if HAVE_LEPTRIS
   fprintf(out, "    - {name: leptris, format: xml, version: '%s', features: {xpath: true, html5: true, xslt: true}}\n", leptris_version());
@@ -800,7 +940,7 @@ int main(int argc, char **argv) {
   fprintf(out, "    - {name: yeptris, format: cbor, version: '%s', features: {}}\n", yeptris_version());
 #endif
   fputs(ser_buf, out);
-  static const char *sections[] = {"parsing", "generation", "xpath"};
+  static const char *sections[] = {"parsing", "generation", "xpath", "validation"};
   fprintf(out, "benchmark_result:\n");
   for (unsigned sec = 0; sec < sizeof(sections)/sizeof(sections[0]); sec++) {
     fprintf(out, "  %s:\n", sections[sec]);
