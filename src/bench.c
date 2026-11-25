@@ -16,18 +16,21 @@
 #include <yeptris.h>
 #include <yeptris/json.h>
 #include <yeptris/parse.h>
+#include <yeptris/plan.h>
 #define YEPTRIS_WITH_CBOR
 #include <yeptris/cbor.h>
 #endif
 #if HAVE_TEPTRIS
 #include <teptris/teptris.h>
 #include <teptris/schema.h>
+#include <teptris/plan.h>
 #endif
 #if HAVE_LIBXML2
 #include <libxml/parser.h>
 #include <libxml/HTMLparser.h>
 #include <libxml/HTMLtree.h>
 #include <libxml/tree.h>
+#include <libxml/c14n.h>
 #include <libxml/xmlschemastypes.h>
 #endif
 #if HAVE_LIBXSLT
@@ -465,6 +468,49 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         if (schema) xmlSchemaFree(schema);
       }
 #endif
+
+      /* c14n: canonical XML serialization (leptris vs libxml2 parity) */
+      g_cur_op = "c14n";
+#if HAVE_LEPTRIS
+      BENCH("leptris-c14n", "xml", sizes[s], iters[s],, {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument d = leptris_parse_string(data, len, &st);
+        if (st == LEPTRIS_OK) {
+          char *out = leptris_c14n_canonicalize(d, 0, 0);
+          if (out) leptris_free_string(out);
+          leptris_document_free(d);
+        }
+      },);
+#endif
+#if HAVE_LIBXML2
+      BENCH("libxml2-c14n", "xml", sizes[s], iters[s],, {
+        xmlDocPtr d = xmlReadMemory(data, (int)len, NULL, NULL, 0);
+        if (d) {
+          xmlChar *out = NULL;
+          xmlC14NDocDumpMemory(d, NULL, 0, 0, 0, &out);
+          if (out) xmlFree(out);
+          xmlFreeDoc(d);
+        }
+      },);
+#endif
+
+      /* diff: tree-vs-tree structural diff. Both sides parse the same
+         document — the op measures the full traversal+compare walk;
+         no sibling competitor ships a DOM diff. */
+      g_cur_op = "diff";
+#if HAVE_LEPTRIS
+      BENCH("leptris-diff", "xml", sizes[s], iters[s],, {
+        LeptrisStatus st = LEPTRIS_OK;
+        LeptrisDocument a = leptris_parse_string(data, len, &st);
+        LeptrisDocument b = st == LEPTRIS_OK ? leptris_parse_string(data, len, &st) : NULL;
+        if (st == LEPTRIS_OK) {
+          LeptrisDiff diff = leptris_diff(a, b, 0, &st);
+          if (diff) leptris_diff_free(diff);
+        }
+        leptris_document_free(a);
+        leptris_document_free(b);
+      },);
+#endif
       g_cur_op = "parsing";
     }
 
@@ -616,6 +662,42 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
           free(sdata);
         }
       }
+
+      /* plan: compiled query plan (yeptris's query face — leaves only,
+         segmented path; spec grammar per yeptris/plan.h. compile once
+         outside the loop, parse+walk is the per-iteration work) */
+      g_cur_op = "plan";
+      {
+        static const char *small_spec =
+          "{\"kind\":\"map\",\"path\":[\"config\",\"database\"],\"children\":["
+          "{\"name\":\"host\",\"kind\":\"str\"},{\"name\":\"port\",\"kind\":\"int\"},"
+          "{\"name\":\"name\",\"kind\":\"str\"},{\"name\":\"user\",\"kind\":\"str\"},"
+          "{\"name\":\"password\",\"kind\":\"str\"}]}";
+        static const char *medium_spec =
+          "{\"kind\":\"seq\",\"path\":[\"users\"],\"children\":["
+          "{\"name\":\"id\",\"kind\":\"int\"},{\"name\":\"name\",\"kind\":\"str\"},"
+          "{\"name\":\"email\",\"kind\":\"str\"},{\"name\":\"created_at\",\"kind\":\"str\"}]}";
+        static const char *large_spec =
+          "{\"kind\":\"map\",\"path\":[\"dataset\",\"records\"],\"children\":["
+          "{\"name\":\"id\",\"kind\":\"int\"},{\"name\":\"timestamp\",\"kind\":\"str\"}]}";
+        const char *spec = !strcmp(sizes[s], "small") ? small_spec
+                         : !strcmp(sizes[s], "medium") ? medium_spec : large_spec;
+        size_t spec_len = strlen(spec);
+        YeptrisStatus st = 0;
+        yeptris_plan *plan = yeptris_plan_compile(spec, spec_len, &st);
+        if (plan && st == 0) {
+          BENCH("yeptris-plan", "json", sizes[s], iters[s],, {
+            YeptrisStatus vst = 0;
+            YeptrisDocument d = yeptris_parse_json(data, len, &vst);
+            if (vst == 0) {
+              yeptris_plan_result *r = yeptris_document_plan_walk(d, plan, &vst);
+              if (r) yeptris_plan_result_free(r);
+              yeptris_document_free(d);
+            }
+          },);
+        }
+        if (plan) yeptris_plan_free(plan);
+      }
       g_cur_op = "parsing";
 #endif
     }
@@ -740,6 +822,64 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
           if (schema) teptris_schema_free(schema);
           free(sdata);
         }
+      }
+
+      /* plan: compiled query plan over the document (teptris's query
+         face; flattened plan tree per plan.h — build once outside the
+         loop, parse+walk is the per-iteration work) */
+      g_cur_op = "plan";
+      {
+        static const teptris_plan_row cfg_rows[] = {
+            {"config", TEPTRIS_PLAN_NESTED, 1},
+            {"database", TEPTRIS_PLAN_NESTED, 2}, {"cache", TEPTRIS_PLAN_NESTED, 3},
+            {"host", TEPTRIS_PLAN_SCALAR, 0}, {"port", TEPTRIS_PLAN_SCALAR, 0},
+            {"name", TEPTRIS_PLAN_SCALAR, 0}, {"user", TEPTRIS_PLAN_SCALAR, 0},
+            {"password", TEPTRIS_PLAN_SCALAR, 0},
+            {"enabled", TEPTRIS_PLAN_SCALAR, 0}, {"ttl", TEPTRIS_PLAN_SCALAR, 0}};
+        static const uint32_t cfg_first[] = {0, 1, 3, 8, 10};
+        static const teptris_plan_row usr_rows[] = {
+            {"users", TEPTRIS_PLAN_COLLECTION, 1},
+            {"id", TEPTRIS_PLAN_SCALAR, 0}, {"name", TEPTRIS_PLAN_SCALAR, 0},
+            {"email", TEPTRIS_PLAN_SCALAR, 0}, {"created_at", TEPTRIS_PLAN_SCALAR, 0},
+            {"profile", TEPTRIS_PLAN_NESTED, 2},
+            {"age", TEPTRIS_PLAN_SCALAR, 0}, {"city", TEPTRIS_PLAN_SCALAR, 0},
+            {"preferences", TEPTRIS_PLAN_NESTED, 3},
+            {"theme", TEPTRIS_PLAN_SCALAR, 0}, {"notifications", TEPTRIS_PLAN_SCALAR, 0}};
+        static const uint32_t usr_first[] = {0, 1, 6, 9, 11};
+        static const teptris_plan_row ds_rows[] = {
+            {"dataset", TEPTRIS_PLAN_NESTED, 1},
+            {"header", TEPTRIS_PLAN_NESTED, 2}, {"records", TEPTRIS_PLAN_COLLECTION, 3},
+            {"created", TEPTRIS_PLAN_SCALAR, 0}, {"count", TEPTRIS_PLAN_SCALAR, 0},
+            {"format", TEPTRIS_PLAN_SCALAR, 0},
+            {"id", TEPTRIS_PLAN_SCALAR, 0}, {"timestamp", TEPTRIS_PLAN_SCALAR, 0},
+            {"data", TEPTRIS_PLAN_NESTED, 4}, {"metadata", TEPTRIS_PLAN_NESTED, 5},
+            {"field1", TEPTRIS_PLAN_SCALAR, 0}, {"field2", TEPTRIS_PLAN_SCALAR, 0},
+            {"field3", TEPTRIS_PLAN_SCALAR, 0}, {"nested", TEPTRIS_PLAN_RAW, 0},
+            {"source", TEPTRIS_PLAN_SCALAR, 0}, {"version", TEPTRIS_PLAN_SCALAR, 0},
+            {"checksum", TEPTRIS_PLAN_SCALAR, 0}};
+        static const uint32_t ds_first[] = {0, 1, 3, 6, 10, 14, 17};
+        teptris_plan_spec spec;
+        if (!strcmp(sizes[s], "small")) {
+          spec = (teptris_plan_spec){TEPTRIS_PLAN_ABI_VERSION, 4, cfg_rows, cfg_first};
+        } else if (!strcmp(sizes[s], "medium")) {
+          spec = (teptris_plan_spec){TEPTRIS_PLAN_ABI_VERSION, 4, usr_rows, usr_first};
+        } else {
+          spec = (teptris_plan_spec){TEPTRIS_PLAN_ABI_VERSION, 6, ds_rows, ds_first};
+        }
+        teptris_status pst = TEPTRIS_OK;
+        teptris_plan *plan = teptris_plan_build(&spec, &pst);
+        if (plan && pst == TEPTRIS_OK) {
+          BENCH("teptris-plan", "toml", sizes[s], iters[s],, {
+            teptris_document *d = NULL;
+            if (teptris_parse(data, len, NULL, &d) == TEPTRIS_OK && d) {
+              teptris_status wst;
+              teptris_plan_result *r = teptris_plan_walk(plan, teptris_document_root(d), &wst);
+              if (r) teptris_plan_result_free(r);
+            }
+            teptris_document_free(d);
+          },);
+        }
+        if (plan) teptris_plan_free(plan);
       }
       g_cur_op = "parsing";
 #endif
@@ -887,7 +1027,7 @@ int main(int argc, char **argv) {
   );
   fprintf(out, "  runtime_version: %s\n", getenv("SERIALBENCH_C_VERSION") ? getenv("SERIALBENCH_C_VERSION") : "native");
   fprintf(out, "benchmark_config:\n  name: c-full\n  formats: [xml, html, json, yaml, toml]\n  operations: [parsing");
-  fprintf(out, ", generation, xpath, validation, xslt]\n");
+  fprintf(out, ", generation, xpath, validation, c14n, diff, plan, xslt]\n");
   fprintf(out, "serializers:\n");
 #if HAVE_LEPTRIS
   fprintf(out, "    - {name: leptris, format: xml, version: '%s', features: {xpath: true, html5: true, xslt: true}}\n", leptris_version());
@@ -940,7 +1080,7 @@ int main(int argc, char **argv) {
   fprintf(out, "    - {name: yeptris, format: cbor, version: '%s', features: {}}\n", yeptris_version());
 #endif
   fputs(ser_buf, out);
-  static const char *sections[] = {"parsing", "generation", "xpath", "validation"};
+  static const char *sections[] = {"parsing", "generation", "xpath", "validation", "c14n", "diff", "plan"};
   fprintf(out, "benchmark_result:\n");
   for (unsigned sec = 0; sec < sizeof(sections)/sizeof(sections[0]); sec++) {
     fprintf(out, "  %s:\n", sections[sec]);
