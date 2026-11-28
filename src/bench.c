@@ -11,6 +11,7 @@
 
 #if HAVE_LEPTRIS
 #include <leptris.h>
+#include <leptris/descriptor.h>
 #endif
 #if HAVE_YEPTRIS
 #include <yeptris.h>
@@ -510,6 +511,136 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         leptris_document_free(a);
         leptris_document_free(b);
       },);
+#endif
+
+      /* plan: descriptor materialization (leptris's XML query face —
+         the tree-shaped plan compiles once outside the loop;
+         parse+walk is the per-iteration work, mirroring the
+         ruby/py faces. Dialect: a NESTED row applies its child
+         plan to each match, so a wrapper element (records) needs
+         its own plan whose rows bind the repeated children). */
+      g_cur_op = "plan";
+#if HAVE_LEPTRIS
+      {
+        /* small: config -> {database, cache} */
+        static const leptris_child_plan cfg_root_children[] = {
+            {.wire_name = "database", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 1},
+            {.wire_name = "cache", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 2},
+        };
+        static const leptris_child_plan cfg_db_children[] = {
+            {.wire_name = "host", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "port", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "name", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "user", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "password", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+        };
+        static const leptris_child_plan cfg_cache_children[] = {
+            {.wire_name = "enabled", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "ttl", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+        };
+        static const leptris_element_plan cfg_plans[] = {
+            {.element_name = "config", .child_count = 2, .child_plans = cfg_root_children},
+            {.element_name = "database", .child_count = 5, .child_plans = cfg_db_children},
+            {.element_name = "cache", .child_count = 2, .child_plans = cfg_cache_children},
+        };
+        static const leptris_plan_spec cfg_spec = {
+            LEPTRIS_PLAN_ABI_VERSION, 3, cfg_plans};
+
+        /* medium: users -> user(id attr) -> profile -> preferences */
+        static const leptris_child_plan usr_root_children[] = {
+            {.wire_name = "user", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 1},
+        };
+        static const leptris_attr_plan usr_user_attrs[] = {
+            {.wire_name = "id", .kind = LEPTRIS_PLAN_KIND_SCALAR},
+        };
+        static const leptris_child_plan usr_user_children[] = {
+            {.wire_name = "name", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "email", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "created_at", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "profile", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 2},
+        };
+        static const leptris_child_plan usr_profile_children[] = {
+            {.wire_name = "age", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "city", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "preferences", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 3},
+        };
+        static const leptris_child_plan usr_prefs_children[] = {
+            {.wire_name = "theme", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "notifications", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+        };
+        static const leptris_element_plan usr_plans[] = {
+            {.element_name = "users", .child_count = 1, .child_plans = usr_root_children},
+            {.element_name = "user", .attribute_count = 1, .attribute_plans = usr_user_attrs,
+             .child_count = 4, .child_plans = usr_user_children},
+            {.element_name = "profile", .child_count = 3, .child_plans = usr_profile_children},
+            {.element_name = "preferences", .child_count = 2, .child_plans = usr_prefs_children},
+        };
+        static const leptris_plan_spec usr_spec = {
+            LEPTRIS_PLAN_ABI_VERSION, 4, usr_plans};
+
+        /* large: dataset -> {header, records -> record(id attr)
+           -> {timestamp, data, metadata}} */
+        static const leptris_child_plan ds_root_children[] = {
+            {.wire_name = "header", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 1},
+            {.wire_name = "records", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 2},
+        };
+        static const leptris_child_plan ds_header_children[] = {
+            {.wire_name = "created", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "count", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "format", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+        };
+        static const leptris_child_plan ds_records_children[] = {
+            {.wire_name = "record", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 3},
+        };
+        static const leptris_attr_plan ds_record_attrs[] = {
+            {.wire_name = "id", .kind = LEPTRIS_PLAN_KIND_SCALAR},
+        };
+        static const leptris_child_plan ds_record_children[] = {
+            {.wire_name = "timestamp", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "data", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 4},
+            {.wire_name = "metadata", .kind = LEPTRIS_PLAN_KIND_NESTED, .child_plan_index = 5},
+        };
+        static const leptris_child_plan ds_data_children[] = {
+            {.wire_name = "field1", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "field2", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "field3", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+        };
+        static const leptris_child_plan ds_meta_children[] = {
+            {.wire_name = "source", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "version", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+            {.wire_name = "checksum", .kind = LEPTRIS_PLAN_KIND_SCALAR, .child_plan_index = -1},
+        };
+        static const leptris_element_plan ds_plans[] = {
+            {.element_name = "dataset", .child_count = 2, .child_plans = ds_root_children},
+            {.element_name = "header", .child_count = 3, .child_plans = ds_header_children},
+            {.element_name = "records", .child_count = 1, .child_plans = ds_records_children},
+            {.element_name = "record", .attribute_count = 1, .attribute_plans = ds_record_attrs,
+             .child_count = 3, .child_plans = ds_record_children},
+            {.element_name = "data", .child_count = 3, .child_plans = ds_data_children},
+            {.element_name = "metadata", .child_count = 3, .child_plans = ds_meta_children},
+        };
+        static const leptris_plan_spec ds_spec = {
+            LEPTRIS_PLAN_ABI_VERSION, 6, ds_plans};
+
+        const leptris_plan_spec *spec = !strcmp(sizes[s], "small") ? &cfg_spec
+                                      : !strcmp(sizes[s], "medium") ? &usr_spec
+                                                                    : &ds_spec;
+        LeptrisStatus pst = LEPTRIS_OK;
+        LeptrisPlan plan = leptris_plan_build(spec, &pst);
+        if (plan && pst == LEPTRIS_OK) {
+          BENCH("leptris-plan", "xml", sizes[s], iters[s],, {
+            LeptrisStatus st = LEPTRIS_OK;
+            LeptrisDocument d = leptris_parse_string(data, len, &st);
+            if (st == LEPTRIS_OK) {
+              LeptrisPlanResult r =
+                  leptris_plan_walk(d, leptris_document_root(d), plan, &st);
+              if (r) leptris_plan_result_free(r);
+            }
+            leptris_document_free(d);
+          },);
+        }
+        if (plan) leptris_plan_free(plan);
+      }
 #endif
       g_cur_op = "parsing";
     }
