@@ -869,6 +869,44 @@ static void run_format(const char *fmt, const char *dir, const char *fixtures_ex
         }
         yeptris_document_free(d);
       },);
+
+      /* plan: compiled query plan over the yaml fixtures (same core
+         walk the json face uses; the canonical yaml keys are symbol-
+         style, so wire names and path segments carry the leading
+         colon — mirroring the js/py faces). compile once outside the
+         loop, parse+walk is the per-iteration work. */
+      g_cur_op = "plan";
+      {
+        static const char *small_spec =
+          "{\"kind\":\"map\",\"path\":[\":config\",\":database\"],\"children\":["
+          "{\"name\":\":host\",\"kind\":\"str\"},{\"name\":\":port\",\"kind\":\"int\"},"
+          "{\"name\":\":name\",\"kind\":\"str\"},{\"name\":\":user\",\"kind\":\"str\"},"
+          "{\"name\":\":password\",\"kind\":\"str\"}]}";
+        static const char *medium_spec =
+          "{\"kind\":\"seq\",\"path\":[\":users\"],\"children\":["
+          "{\"name\":\":id\",\"kind\":\"int\"},{\"name\":\":name\",\"kind\":\"str\"},"
+          "{\"name\":\":email\",\"kind\":\"str\"},{\"name\":\":created_at\",\"kind\":\"str\"}]}";
+        static const char *large_spec =
+          "{\"kind\":\"map\",\"path\":[\":dataset\",\":records\"],\"children\":["
+          "{\"name\":\":id\",\"kind\":\"int\"},{\"name\":\":timestamp\",\"kind\":\"str\"}]}";
+        const char *spec = !strcmp(sizes[s], "small") ? small_spec
+                         : !strcmp(sizes[s], "medium") ? medium_spec : large_spec;
+        size_t spec_len = strlen(spec);
+        YeptrisStatus st = 0;
+        yeptris_plan *plan = yeptris_plan_compile(spec, spec_len, &st);
+        if (plan && st == 0) {
+          BENCH("yeptris-plan", "yaml", sizes[s], iters[s],, {
+            YeptrisStatus vst = 0;
+            YeptrisDocument d = yeptris_parse(data, len, &vst);
+            if (vst == 0) {
+              yeptris_plan_result *r = yeptris_document_plan_walk(d, plan, &vst);
+              if (r) yeptris_plan_result_free(r);
+              yeptris_document_free(d);
+            }
+          },);
+        }
+        if (plan) yeptris_plan_free(plan);
+      }
       g_cur_op = "parsing";
 #endif
 
